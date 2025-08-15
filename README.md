@@ -1,11 +1,12 @@
-# gcli2api
+# jellycli
 
-Rust implementation of GeminiCLI to OpenAI API bridge.
 
+GeminiCLI to OpenAI API的rust实现
 ## 功能
 
 - 将 Google Gemini API 转换为 OpenAI API 格式
 - 支持流式和非流式响应
+- 支持假流式响应
 - 多凭证轮换机制
 - 错误处理和冷却机制
 
@@ -66,5 +67,5 @@ Rust implementation of GeminiCLI to OpenAI API bridge.
 
 1. 复制 `config.example.json` 为 `config.json` 并根据需要修改配置
 2. 将 Google 凭证文件放入 `credentials` 目录
-3. 运行程序：`cargo run --release`
+3. 运行程序：
 4. 使用 OpenAI 兼容的 API 访问：`http://localhost:7878/v1/chat/completions`

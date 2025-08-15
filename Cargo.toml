@@ -1,0 +1,57 @@
+[package]
+name = "gcli2api"
+version = "0.1.0"
+edition = "2024"
+description = "Rust implementation of GeminiCLI to OpenAI API bridge"
+
+[[bin]]
+name = "gcli2api"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["multipart"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+hyper = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Date and time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async streams
+futures = "0.3"
+tokio-stream = "0.1"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Configuration
+toml = "0.8"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# URL encoding
+urlencoding = "2.1"
+
+# Base64 encoding
+base64 = "0.22"
+
+# URL parsing
+url = "2.5"
+
+# Async trait
+async-trait = "0.1"

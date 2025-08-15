@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct GeminiPart {
     #[serde(default)]
     pub text: String,
+    #[serde(default)]
+    pub thought: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -35,6 +37,16 @@ pub struct GeminiGenerationConfig {
     pub max_output_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingConfig")]
+    pub thinking_config: Option<GeminiThinkingConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeminiThinkingConfig {
+    #[serde(rename = "thinkingBudget")]
+    pub thinking_budget: i32,
+    #[serde(rename = "includeThoughts")]
+    pub include_thoughts: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5,6 +5,7 @@ use crate::models::{
     GeminiRequest, GeminiContent, GeminiPart, GeminiGenerationConfig,
     GeminiResponse, GeminiStreamChunk
 };
+use crate::utils::thinking_config::*;
 use serde_json::Value;
 use uuid::Uuid;
 use chrono::Utc;
@@ -41,7 +42,7 @@ pub fn openai_to_gemini_request(openai_req: &OpenAIChatCompletionRequest) -> Gem
 
         GeminiContent {
             role,
-            parts: vec![GeminiPart { text }],
+            parts: vec![GeminiPart { text, thought: false }],
         }
     }).collect();
 
@@ -65,16 +66,66 @@ pub fn openai_to_gemini_request(openai_req: &OpenAIChatCompletionRequest) -> Gem
                     _ => None,
                 }
             }),
+            thinking_config: None,
         })
     } else {
         None
     };
 
-    GeminiRequest {
+    let mut request = GeminiRequest {
         contents,
         generation_config,
         safety_settings: None,
+    };
+    
+    // Add thinking configuration if needed
+    if let Some(thinking_config) = get_thinking_config(&openai_req.model) {
+        if let Some(ref mut gen_config) = request.generation_config {
+            gen_config.thinking_config = Some(thinking_config);
+        } else {
+            request.generation_config = Some(GeminiGenerationConfig {
+                temperature: None,
+                top_p: None,
+                top_k: None,
+                max_output_tokens: None,
+                stop_sequences: None,
+                thinking_config: Some(thinking_config),
+            });
+        }
     }
+    
+    request
+}
+
+fn extract_content_and_reasoning(parts: &[GeminiPart]) -> (String, String) {
+    let mut content = String::new();
+    let mut reasoning_content = String::new();
+    
+    for part in parts {
+        if !part.text.is_empty() {
+            if part.thought {
+                reasoning_content.push_str(&part.text);
+            } else {
+                content.push_str(&part.text);
+            }
+        }
+    }
+    
+    (content, reasoning_content)
+}
+
+fn build_message_with_reasoning(role: &str, content: String, reasoning_content: String) -> OpenAIChatMessage {
+    let mut message = OpenAIChatMessage {
+        role: role.to_string(),
+        content: Value::String(content),
+        reasoning_content: None,
+    };
+    
+    if !reasoning_content.is_empty() {
+        message.reasoning_content = Some(reasoning_content);
+    }
+    
+    message
 }
 
 pub fn gemini_to_openai_response(
@@ -85,18 +136,18 @@ pub fn gemini_to_openai_response(
     let created = Utc::now().timestamp();
 
     let choices = gemini_resp.candidates.iter().map(|candidate| {
-        let content = candidate.content.parts.iter()
-            .map(|part| part.text.as_str())
-            .collect::<Vec<_>>()
-            .join("");
+        let role = if candidate.content.role == "model" {
+            "assistant"
+        } else {
+            &candidate.content.role
+        };
+        
+        let (content, reasoning_content) = extract_content_and_reasoning(&candidate.content.parts);
+        let message = build_message_with_reasoning(role, content, reasoning_content);
 
         OpenAIChatCompletionChoice {
             index: candidate.index,
-            message: OpenAIChatMessage {
-                role: "assistant".to_string(),
-                content: Value::String(content),
-                reasoning_content: None,
-            },
+            message,
             finish_reason: candidate.finish_reason.clone(),
         }
     }).collect();
@@ -119,21 +170,17 @@ pub fn gemini_stream_to_openai_stream(
     let created = Utc::now().timestamp();
 
     let choices = gemini_chunk.candidates.iter().map(|candidate| {
-        let content = if candidate.content.parts.is_empty() {
-            None
-        } else {
-            Some(candidate.content.parts.iter()
-                .map(|part| part.text.as_str())
-                .collect::<Vec<_>>()
-                .join(""))
-        };
-
+        let (content_text, reasoning_text) = extract_content_and_reasoning(&candidate.content.parts);
+        
+        let content = if content_text.is_empty() { None } else { Some(content_text) };
+        let reasoning_content = if reasoning_text.is_empty() { None } else { Some(reasoning_text) };
+        
         OpenAIChatCompletionStreamChoice {
             index: candidate.index,
             delta: OpenAIDelta {
                 role: if candidate.index == 0 { Some("assistant".to_string()) } else { None },
                 content,
-                reasoning_content: None,
+                reasoning_content,
             },
             finish_reason: candidate.finish_reason.clone(),
         }

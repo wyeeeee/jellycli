@@ -34,9 +34,20 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    name: Build Windows Binary
-    runs-on: windows-latest
+    name: Build for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     needs: create-tag
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            binary_suffix: .exe
+            archive_name: gcli2api-windows-x86_64.zip
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary_suffix: ""
+            archive_name: gcli2api-linux-x86_64.tar.gz
 
     steps:
     - name: Checkout code
@@ -47,7 +58,7 @@ jobs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        targets: x86_64-pc-windows-msvc
+        targets: ${{ matrix.target }}
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -56,31 +67,40 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          windows-cargo-
+          ${{ runner.os }}-cargo-${{ matrix.target }}-
+          ${{ runner.os }}-cargo-
 
     - name: Build binary
       run: |
-        cargo build --release --target x86_64-pc-windows-msvc
+        cargo build --release --target ${{ matrix.target }}
 
     - name: Prepare binary for upload
+      shell: bash
       run: |
+        binary_name="gcli2api${{ matrix.binary_suffix }}"
+        target_dir="target/${{ matrix.target }}/release"
+        
         # Create release directory
-        mkdir release
+        mkdir -p release
         
         # Copy binary
-        cp target/x86_64-pc-windows-msvc/release/gcli2api.exe release/
+        cp "$target_dir/$binary_name" "release/"
         
-        # Create zip archive
+        # Create archive
         cd release
-        7z a gcli2api-windows-x86_64.zip gcli2api.exe
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          7z a "${{ matrix.archive_name }}" "$binary_name"
+        else
+          tar -czf "${{ matrix.archive_name }}" "$binary_name"
+        fi
 
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4
       with:
-        name: gcli2api-windows
-        path: release/gcli2api-windows-x86_64.zip
+        name: gcli2api-${{ matrix.target }}
+        path: release/${{ matrix.archive_name }}
 
   release:
     name: Create Release
@@ -93,11 +113,16 @@ jobs:
       with:
         ref: ${{ github.event.inputs.tag }}
 
-    - name: Download artifacts
+    - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
-        name: gcli2api-windows
-        path: release-assets
+        path: artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        find artifacts -name "*.zip" -o -name "*.tar.gz" | xargs -I {} cp {} release-assets/
+        ls -la release-assets/
 
     - name: Create Release
       uses: softprops/action-gh-release@v1

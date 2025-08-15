@@ -6,13 +6,15 @@ use axum::{
 };
 use axum::response::Json;
 use crate::models::ErrorResponse;
+use crate::utils::AppConfig;
 
 pub async fn auth_middleware(
-    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
-    let password = std::env::var("PASSWORD").unwrap_or_else(|_| "pwd".to_string());
+    let headers = request.headers();
+    let config = AppConfig::from_file();
+    let password = &config.password;
     
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
@@ -46,7 +48,6 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-pub fn validate_password(token: &str) -> bool {
-    let password = std::env::var("PASSWORD").unwrap_or_else(|_| "pwd".to_string());
-    token == password
+pub fn validate_password(token: &str, config_password: &str) -> bool {
+    token == config_password
 }

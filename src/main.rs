@@ -10,7 +10,7 @@ use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tracing::{info, error};
 
-use crate::auth::CredentialManager;
+use crate::auth::{CredentialManager, init_auth_config};
 use crate::client::GeminiCliService;
 use crate::routes::create_api_routes;
 use crate::utils::{AppConfig, init_logger};
@@ -21,7 +21,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
     // Load configuration
-    let config = AppConfig::from_file();
+    let config = Arc::new(AppConfig::from_file());
+    
+    // Initialize auth config for middleware
+    init_auth_config(Arc::clone(&config));
+    
     info!("Starting gcli2api server...");
     info!("Configuration:");
     info!("  Bind address: {}", config.bind_address);

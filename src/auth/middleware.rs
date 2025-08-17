@@ -5,15 +5,22 @@ use axum::{
     response::Response,
 };
 use axum::response::Json;
+use std::sync::{Arc, OnceLock};
 use crate::models::ErrorResponse;
 use crate::utils::AppConfig;
+
+static CONFIG: OnceLock<Arc<AppConfig>> = OnceLock::new();
+
+pub fn init_auth_config(config: Arc<AppConfig>) {
+    CONFIG.set(config).ok();
+}
 
 pub async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     let headers = request.headers();
-    let config = AppConfig::from_file();
+    let config = CONFIG.get().expect("Config not initialized");
     let password = &config.password;
     
     if let Some(auth_header) = headers.get("authorization") {

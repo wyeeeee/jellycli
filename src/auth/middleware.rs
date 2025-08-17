@@ -6,6 +6,7 @@ use axum::{
 };
 use axum::response::Json;
 use std::sync::{Arc, OnceLock};
+use tracing::{info, warn};
 use crate::models::ErrorResponse;
 use crate::utils::AppConfig;
 
@@ -21,17 +22,31 @@ pub async fn auth_middleware(
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     let headers = request.headers();
     let config = CONFIG.get().expect("Config not initialized");
-    let password = &config.password;
+    let system_password = &config.password;
+    
+    info!("🔐 Auth check - System password: '{}'", system_password);
     
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.starts_with("Bearer ") {
-                let token = &auth_str[7..];
-                if token == password {
+                let user_password = &auth_str[7..];
+                info!("🔐 Auth check - User input password: '{}'", user_password);
+                info!("🔐 Auth check - Passwords match: {}", user_password == system_password);
+                
+                if user_password == system_password {
+                    info!("✅ Authentication successful");
                     return Ok(next.run(request).await);
+                } else {
+                    warn!("❌ Password mismatch - System: '{}', User: '{}'", system_password, user_password);
                 }
+            } else {
+                warn!("❌ Invalid authorization header format (not Bearer)");
             }
+        } else {
+            warn!("❌ Invalid authorization header (not UTF-8)");
         }
+    } else {
+        warn!("❌ No authorization header found");
     }
     
     Err((

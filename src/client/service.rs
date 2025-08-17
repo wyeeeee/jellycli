@@ -92,9 +92,9 @@ impl GeminiCliService {
             return self.handle_fake_streaming(request).await;
         }
 
-        // Prepare request
-        let (gemini_request, creds, project_id, current_file_path) = 
-            match self.prepare_request(&request).await {
+        // Prepare request with retry mechanism
+        let (gemini_request, creds, project_id, current_file_name) = 
+            match self.prepare_request_with_retry(&request).await {
                 Ok(data) => data,
                 Err(e) => {
                     error!("Failed to prepare request: {}", e);
@@ -106,11 +106,11 @@ impl GeminiCliService {
                 }
             };
 
-        // Handle streaming vs non-streaming
+        // Handle streaming vs non-streaming with retry
         if request.stream {
-            self.handle_streaming_request(gemini_request, &real_model, &creds, &project_id, &current_file_path).await
+            self.handle_streaming_request_with_retry(gemini_request, &real_model, &creds, &project_id, &current_file_name, &request).await
         } else {
-            self.handle_non_streaming_request(gemini_request, &real_model, &creds, &project_id, &current_file_path).await
+            self.handle_non_streaming_request_with_retry(gemini_request, &real_model, &creds, &project_id, &current_file_name, &request).await
         }
     }
 
@@ -125,8 +125,7 @@ impl GeminiCliService {
         let (mut creds, project_id) = manager.get_current_credentials().await?
             .ok_or_else(|| anyhow::anyhow!("No credentials available - please configure OAuth credentials via /auth endpoint"))?;
 
-        let current_file_path = manager.get_current_file_path()
-            .map(|p| p.to_string_lossy().to_string());
+        let current_file_name = manager.get_current_file_name();
 
         // Refresh credentials if needed
         manager.refresh_credentials(&mut creds).await?;
@@ -139,7 +138,34 @@ impl GeminiCliService {
         // Convert request to Gemini format
         let gemini_request = openai_to_gemini_request(request);
 
-        Ok((gemini_request, creds, project_id, current_file_path))
+        Ok((gemini_request, creds, project_id, current_file_name))
+    }
+
+    async fn prepare_request_with_retry(
+        &self,
+        request: &OpenAIChatCompletionRequest,
+    ) -> Result<(crate::models::GeminiRequest, crate::auth::GoogleCredentials, Option<String>, Option<String>)> {
+        // Increment call count and get credentials with retry
+        let mut manager = self.credential_manager.write().await;
+        manager.increment_call_count();
+
+        let (mut creds, project_id) = manager.get_credentials_with_retry().await?
+            .ok_or_else(|| anyhow::anyhow!("No credentials available - please configure OAuth credentials via /auth endpoint"))?;
+
+        let current_file_name = manager.get_current_file_name();
+
+        // Refresh credentials if needed
+        manager.refresh_credentials(&mut creds).await?;
+
+        // Onboard user if needed
+        if let Some(ref project_id) = project_id {
+            self.gemini_client.onboard_user(&creds, project_id).await?;
+        }
+
+        // Convert request to Gemini format
+        let gemini_request = openai_to_gemini_request(request);
+
+        Ok((gemini_request, creds, project_id, current_file_name))
     }
 
     async fn handle_streaming_request(
@@ -148,22 +174,13 @@ impl GeminiCliService {
         model: &str,
         creds: &crate::auth::GoogleCredentials,
         project_id: &Option<String>,
-        current_file_path: &Option<String>,
+        current_file_name: &Option<String>,
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
         let response_id = format!("chatcmpl-{}", Uuid::new_v4());
-        let token_suffix = creds.access_token.as_ref()
-            .map(|token| {
-                let len = token.len();
-                if len > 8 {
-                    format!("...{}", &token[len-8..])
-                } else {
-                    format!("...{}", token)
-                }
-            })
-            .unwrap_or_else(|| "...unknown".to_string());
+        let credential_id = creds.get_credential_id();
         
-        info!("🚀 Starting streaming request - Model: {}, Token: {}, RequestID: {}", 
-              model, token_suffix, response_id);
+        info!("🚀 Starting streaming request - Model: {}, Credential: {}, RequestID: {}", 
+              model, credential_id, response_id);
         
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
@@ -175,7 +192,7 @@ impl GeminiCliService {
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(100);
                 let response_id_clone = response_id.clone();
                 let model_clone = model.to_string();
-                let current_file_clone = current_file_path.clone();
+                let current_file_clone = current_file_name.clone();
                 let credential_manager = Arc::clone(&self.credential_manager);
 
                 tokio::spawn(async move {
@@ -244,11 +261,11 @@ impl GeminiCliService {
             },
             Err(e) => {
                 error!("Failed to create streaming request: {}", e);
-                info!("❌ Streaming request failed to start - Model: {}, Token: {}, Error: {}", 
-                      model, token_suffix, e);
+                info!("❌ Streaming request failed to start - Model: {}, Credential: {}, Error: {}", 
+                      model, credential_id, e);
                 
                 // Record error if we have file path
-                if let Some(file_path) = current_file_path {
+                if let Some(file_path) = current_file_name {
                     let mut manager = self.credential_manager.write().await;
                     let _ = manager.record_error(file_path, 500).await;
                 }
@@ -268,22 +285,13 @@ impl GeminiCliService {
         model: &str,
         creds: &crate::auth::GoogleCredentials,
         project_id: &Option<String>,
-        current_file_path: &Option<String>,
+        current_file_name: &Option<String>,
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
-        let token_suffix = creds.access_token.as_ref()
-            .map(|token| {
-                let len = token.len();
-                if len > 8 {
-                    format!("...{}", &token[len-8..])
-                } else {
-                    format!("...{}", token)
-                }
-            })
-            .unwrap_or_else(|| "...unknown".to_string());
+        let credential_id = creds.get_credential_id();
         let request_id = format!("req-{}", Uuid::new_v4());
         
-        info!("🚀 Starting non-streaming request - Model: {}, Token: {}, RequestID: {}", 
-              model, token_suffix, request_id);
+        info!("🚀 Starting non-streaming request - Model: {}, Credential: {}, RequestID: {}", 
+              model, credential_id, request_id);
         
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
@@ -293,7 +301,7 @@ impl GeminiCliService {
         match self.gemini_client.send_non_streaming_request(&gemini_request, model, creds, project_id_str).await {
             Ok(gemini_response) => {
                 // Record success
-                if let Some(file_path) = current_file_path {
+                if let Some(file_path) = current_file_name {
                     let mut manager = self.credential_manager.write().await;
                     let _ = manager.record_success(file_path).await;
                 }
@@ -307,7 +315,7 @@ impl GeminiCliService {
                 info!("❌ Non-streaming request failed - RequestID: {}, Error: {}", request_id, e);
                 
                 // Record error if we have file path
-                if let Some(file_path) = current_file_path {
+                if let Some(file_path) = current_file_name {
                     let mut manager = self.credential_manager.write().await;
                     let _ = manager.record_error(file_path, 500).await;
                 }
@@ -323,31 +331,22 @@ impl GeminiCliService {
 
     async fn handle_fake_streaming(
         &self,
-        mut request: OpenAIChatCompletionRequest,
+        request: OpenAIChatCompletionRequest,
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
         let request_id = format!("fake-{}", Uuid::new_v4());
         
-        // Get token for logging from current credentials
-        let token_suffix = if let Ok(Some((creds, _))) = {
+        // Get credential ID for logging from current credentials
+        let credential_id = if let Ok(Some((creds, _))) = {
             let mut manager = self.credential_manager.write().await;
             manager.get_current_credentials().await
         } {
-            creds.access_token.as_ref()
-                .map(|token| {
-                    let len = token.len();
-                    if len > 8 {
-                        format!("...{}", &token[len-8..])
-                    } else {
-                        format!("...{}", token)
-                    }
-                })
-                .unwrap_or_else(|| "...unknown".to_string())
+            creds.get_credential_id()
         } else {
-            "...unknown".to_string()
+            "unknown".to_string()
         };
         
-        info!("🚀 Starting fake streaming request - Model: {}, Token: {}, RequestID: {}", 
-              request.model, token_suffix, request_id);
+        info!("🚀 Starting fake streaming request - Model: {}, Credential: {}, RequestID: {}", 
+              request.model, credential_id, request_id);
         
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(100);
         let service = self.clone();
@@ -435,28 +434,19 @@ impl GeminiCliService {
         &self,
         request: OpenAIChatCompletionRequest,
     ) -> Result<OpenAIChatCompletionResponse> {
-        let (gemini_request, creds, project_id, current_file_path) = self.prepare_request(&request).await?;
-        let token_suffix = creds.access_token.as_ref()
-            .map(|token| {
-                let len = token.len();
-                if len > 8 {
-                    format!("...{}", &token[len-8..])
-                } else {
-                    format!("...{}", token)
-                }
-            })
-            .unwrap_or_else(|| "...unknown".to_string());
+        let (gemini_request, creds, project_id, current_file_name) = self.prepare_request(&request).await?;
+        let credential_id = creds.get_credential_id();
         
         let project_id_str = project_id.as_ref().ok_or_else(|| anyhow::anyhow!("No project ID available"))?;
         
-        debug!("Internal non-streaming request - Model: {}, Token: {}", request.model, token_suffix);
+        debug!("Internal non-streaming request - Model: {}, Credential: {}", request.model, credential_id);
         
         let gemini_response = self.gemini_client
             .send_non_streaming_request(&gemini_request, &request.model, &creds, project_id_str)
             .await?;
 
         // Record success
-        if let Some(file_path) = current_file_path {
+        if let Some(file_path) = current_file_name {
             let mut manager = self.credential_manager.write().await;
             let _ = manager.record_success(&file_path).await;
         }
@@ -480,6 +470,132 @@ impl GeminiCliService {
                 },
             }),
         )
+    }
+
+    async fn handle_streaming_request_with_retry(
+        &self,
+        mut gemini_request: crate::models::GeminiRequest,
+        model: &str,
+        initial_creds: &crate::auth::GoogleCredentials,
+        initial_project_id: &Option<String>,
+        initial_file_path: &Option<String>,
+        original_request: &OpenAIChatCompletionRequest,
+    ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+        let mut creds = initial_creds.clone();
+        let mut project_id = initial_project_id.clone();
+        let mut current_file_name = initial_file_path.clone();
+        let mut attempts = 0;
+        let max_retries = {
+            let manager = self.credential_manager.read().await;
+            manager.max_retries()
+        };
+
+        loop {
+            let result = self.handle_streaming_request(
+                gemini_request.clone(),
+                model,
+                &creds,
+                &project_id,
+                &current_file_name,
+            ).await;
+
+            match result {
+                Ok(response) => return Ok(response),
+                Err((status_code, error_response)) => {
+                    attempts += 1;
+                    
+                    // Record error for current credential
+                    if let Some(file_path) = &current_file_name {
+                        let mut manager = self.credential_manager.write().await;
+                        let _ = manager.record_error(file_path, status_code.as_u16()).await;
+                    }
+
+                    if attempts >= max_retries {
+                        error!("Streaming request failed after {} attempts", attempts);
+                        return Err((status_code, error_response));
+                    }
+
+                    // Try to get next credentials
+                    match self.prepare_request_with_retry(original_request).await {
+                        Ok((new_gemini_request, new_creds, new_project_id, new_file_path)) => {
+                            info!("Retrying streaming request with new credentials: {} (attempt {}/{})", 
+                                  new_creds.get_credential_id(), attempts + 1, max_retries);
+                            gemini_request = new_gemini_request;
+                            creds = new_creds;
+                            project_id = new_project_id;
+                            current_file_name = new_file_path;
+                        },
+                        Err(e) => {
+                            error!("Failed to prepare retry request: {}", e);
+                            return Err((status_code, error_response));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn handle_non_streaming_request_with_retry(
+        &self,
+        mut gemini_request: crate::models::GeminiRequest,
+        model: &str,
+        initial_creds: &crate::auth::GoogleCredentials,
+        initial_project_id: &Option<String>,
+        initial_file_path: &Option<String>,
+        original_request: &OpenAIChatCompletionRequest,
+    ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+        let mut creds = initial_creds.clone();
+        let mut project_id = initial_project_id.clone();
+        let mut current_file_name = initial_file_path.clone();
+        let mut attempts = 0;
+        let max_retries = {
+            let manager = self.credential_manager.read().await;
+            manager.max_retries()
+        };
+
+        loop {
+            let result = self.handle_non_streaming_request(
+                gemini_request.clone(),
+                model,
+                &creds,
+                &project_id,
+                &current_file_name,
+            ).await;
+
+            match result {
+                Ok(response) => return Ok(response),
+                Err((status_code, error_response)) => {
+                    attempts += 1;
+                    
+                    // Record error for current credential
+                    if let Some(file_path) = &current_file_name {
+                        let mut manager = self.credential_manager.write().await;
+                        let _ = manager.record_error(file_path, status_code.as_u16()).await;
+                    }
+
+                    if attempts >= max_retries {
+                        error!("Non-streaming request failed after {} attempts", attempts);
+                        return Err((status_code, error_response));
+                    }
+
+                    // Try to get next credentials
+                    match self.prepare_request_with_retry(original_request).await {
+                        Ok((new_gemini_request, new_creds, new_project_id, new_file_path)) => {
+                            info!("Retrying non-streaming request with new credentials: {} (attempt {}/{})", 
+                                  new_creds.get_credential_id(), attempts + 1, max_retries);
+                            gemini_request = new_gemini_request;
+                            creds = new_creds;
+                            project_id = new_project_id;
+                            current_file_name = new_file_path;
+                        },
+                        Err(e) => {
+                            error!("Failed to prepare retry request: {}", e);
+                            return Err((status_code, error_response));
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

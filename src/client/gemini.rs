@@ -1,12 +1,11 @@
 use reqwest::{Client, Response, header::HeaderMap};
 use serde_json::Value;
 use anyhow::{Result, Context};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use tokio_stream::{Stream, StreamExt};
-use futures::stream;
 use std::pin::Pin;
 
-use crate::auth::{GoogleCredentials, CredentialManager};
+use crate::auth::GoogleCredentials;
 use crate::models::{GeminiRequest, GeminiResponse, GeminiStreamChunk};
 use crate::utils::{get_user_agent, get_client_metadata};
 

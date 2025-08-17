@@ -8,6 +8,12 @@ pub struct AppConfig {
     pub credentials_dir: String,
     pub code_assist_endpoint: String,
     pub calls_per_rotation: usize,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: usize,
+}
+
+fn default_max_retries() -> usize {
+    3
 }
 
 impl AppConfig {
@@ -25,7 +31,8 @@ impl AppConfig {
             bind_address: "0.0.0.0:7878".to_string(),
             credentials_dir: "./credentials".to_string(),
             code_assist_endpoint: "https://codeassist-pa.clients6.google.com".to_string(),
-            calls_per_rotation: 100,
+            calls_per_rotation: 1,
+            max_retries: default_max_retries(),
         }
     }
 }

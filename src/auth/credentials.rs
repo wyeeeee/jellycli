@@ -17,6 +17,14 @@ pub struct GoogleCredentials {
     pub expiry: Option<DateTime<Utc>>,
     pub scope: Option<String>,
     pub scopes: Option<Vec<String>>,
+    #[serde(skip)]
+    pub credential_id: Option<String>,
+}
+
+impl GoogleCredentials {
+    pub fn get_credential_id(&self) -> String {
+        self.credential_id.clone().unwrap_or_else(|| "unknown".to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +32,6 @@ pub struct CredentialState {
     pub error_codes: Vec<u16>,
     pub disabled: bool,
     pub last_success: Option<DateTime<Utc>>,
-    pub cd_until: Option<DateTime<Utc>>,
 }
 
 impl Default for CredentialState {
@@ -33,7 +40,6 @@ impl Default for CredentialState {
             error_codes: Vec::new(),
             disabled: false,
             last_success: None,
-            cd_until: None,
         }
     }
 }
@@ -47,10 +53,11 @@ pub struct CredentialManager {
     calls_per_rotation: usize,
     call_count: usize,
     http_client: reqwest::Client,
+    max_retries: usize,
 }
 
 impl CredentialManager {
-    pub fn new(credentials_dir: impl AsRef<Path>, calls_per_rotation: usize) -> Self {
+    pub fn new(credentials_dir: impl AsRef<Path>, calls_per_rotation: usize, max_retries: usize) -> Self {
         let credentials_dir = credentials_dir.as_ref().to_path_buf();
         let state_file = credentials_dir.join("creds_state.toml");
 
@@ -63,6 +70,7 @@ impl CredentialManager {
             calls_per_rotation,
             call_count: 0,
             http_client: reqwest::Client::new(),
+            max_retries,
         }
     }
 
@@ -77,9 +85,6 @@ impl CredentialManager {
         // Discover credential files
         self.discover_credential_files().await?;
         
-        // Clean up expired CD statuses
-        self.cleanup_expired_cd_status();
-
         info!("Credential manager initialized with {} credential files", self.credential_files.len());
         Ok(())
     }
@@ -107,27 +112,6 @@ impl CredentialManager {
         Ok(())
     }
 
-    fn cleanup_expired_cd_status(&mut self) {
-        let now = Utc::now();
-        let today_8am = now.date_naive().and_hms_opt(8, 0, 0)
-            .map(|dt| dt.and_utc())
-            .unwrap_or(now);
-
-        let cutoff_time = if now >= today_8am {
-            today_8am
-        } else {
-            today_8am - chrono::Duration::days(1)
-        };
-
-        for (filename, state) in self.credential_states.iter_mut() {
-            if let Some(cd_until) = state.cd_until {
-                if cd_until <= cutoff_time {
-                    state.cd_until = None;
-                    info!("Cleared expired CD status for {}", filename);
-                }
-            }
-        }
-    }
 
     async fn discover_credential_files(&mut self) -> Result<()> {
         let mut files = Vec::new();
@@ -138,10 +122,13 @@ impl CredentialManager {
         while let Some(entry) = dir_entries.next_entry().await? {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let filename = path.to_string_lossy().to_string();
+                let filename = path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown.json")
+                    .to_string();
                 
-                // Check if credential is available (not disabled and not in CD)
-                if !self.is_credential_disabled(&filename) && !self.is_credential_in_cd(&filename) {
+                // Check if credential is available (not disabled)
+                if !self.is_credential_disabled(&filename) {
                     files.push(path);
                 }
             }
@@ -169,14 +156,6 @@ impl CredentialManager {
             .unwrap_or(false)
     }
 
-    fn is_credential_in_cd(&self, filename: &str) -> bool {
-        if let Some(state) = self.credential_states.get(filename) {
-            if let Some(cd_until) = state.cd_until {
-                return Utc::now() < cd_until;
-            }
-        }
-        false
-    }
 
     pub async fn record_error(&mut self, filename: &str, status_code: u16) -> Result<()> {
         let state = self.get_credential_state(filename);
@@ -185,18 +164,7 @@ impl CredentialManager {
             state.error_codes.push(status_code);
         }
 
-        // Set CD status for 429 errors (rate limiting)
-        if status_code == 429 {
-            let now = Utc::now();
-            let tomorrow_8am = (now + chrono::Duration::days(1))
-                .date_naive()
-                .and_hms_opt(8, 0, 0)
-                .map(|dt| dt.and_utc())
-                .unwrap_or(now + chrono::Duration::days(1));
-            
-            state.cd_until = Some(tomorrow_8am);
-            warn!("Set CD status for {} until {}", filename, tomorrow_8am);
-        }
+        // Simply record the error without any cooldown
 
         self.save_states().await?;
         Ok(())
@@ -211,6 +179,7 @@ impl CredentialManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn set_credential_disabled(&mut self, filename: &str, disabled: bool) -> Result<()> {
         let state = self.get_credential_state(filename);
         state.disabled = disabled;
@@ -224,6 +193,7 @@ impl CredentialManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_credentials_status(&self) -> HashMap<String, CredentialState> {
         self.credential_states.clone()
     }
@@ -233,7 +203,7 @@ impl CredentialManager {
         if self.call_count >= self.calls_per_rotation && !self.credential_files.is_empty() {
             self.current_index = (self.current_index + 1) % self.credential_files.len();
             self.call_count = 0;
-            info!("Rotated to credential index {}", self.current_index);
+            debug!("Rotated to credential index {}", self.current_index);
         }
 
         // Re-discover files if we have no available credentials
@@ -281,6 +251,13 @@ impl CredentialManager {
             return Ok(None);
         }
 
+        // Generate credential ID from file name
+        let file_name = file_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        creds.credential_id = Some(file_name);
+
         // Handle different credential formats
         let value: serde_json::Value = serde_json::from_str(&content)?;
         if creds.access_token.is_none() {
@@ -310,12 +287,25 @@ impl CredentialManager {
         debug!("Call count incremented to {}/{}", self.call_count, self.calls_per_rotation);
     }
 
+    #[allow(dead_code)]
     pub fn get_current_file_path(&self) -> Option<&Path> {
         self.credential_files.get(self.current_index).map(|p| p.as_path())
     }
 
+    pub fn get_current_file_name(&self) -> Option<String> {
+        self.credential_files.get(self.current_index)
+            .and_then(|p| p.file_name())
+            .and_then(|name| name.to_str())
+            .map(|s| s.to_string())
+    }
+
+    #[allow(dead_code)]
     pub fn credentials_dir(&self) -> &Path {
         &self.credentials_dir
+    }
+
+    pub fn max_retries(&self) -> usize {
+        self.max_retries
     }
 
     pub async fn refresh_credentials(&self, creds: &mut GoogleCredentials) -> Result<()> {
@@ -345,14 +335,66 @@ impl CredentialManager {
                         creds.expiry = Some(Utc::now() + chrono::Duration::seconds(expires_in));
                     }
                     
-                    debug!("Successfully refreshed credentials");
+                    debug!("Successfully refreshed credentials for {}", creds.get_credential_id());
                 }
             } else {
                 let error_text = response.text().await.unwrap_or_default();
-                return Err(anyhow::anyhow!("Failed to refresh credentials: {}", error_text));
+                return Err(anyhow::anyhow!("Failed to refresh credentials for {}: {}", creds.get_credential_id(), error_text));
             }
         }
         
         Ok(())
+    }
+
+    pub async fn get_credentials_with_retry(&mut self) -> Result<Option<(GoogleCredentials, Option<String>)>> {
+        // Re-discover files if we have no available credentials
+        if self.credential_files.is_empty() {
+            self.discover_credential_files().await?;
+            if self.credential_files.is_empty() {
+                debug!("No credential files available");
+                return Ok(None);
+            }
+        }
+
+        // First, try to get current credentials (with rotation logic)
+        if let Ok(Some(result)) = self.get_current_credentials().await {
+            return Ok(Some(result));
+        }
+
+        // If that fails, try other credentials
+        let mut tried_indices = std::collections::HashSet::new();
+        tried_indices.insert(self.current_index); // Mark current as tried
+        let mut attempts = 1; // We already tried once above
+        
+        while attempts < self.max_retries && tried_indices.len() < self.credential_files.len() {
+            // Move to next credential file
+            self.current_index = (self.current_index + 1) % self.credential_files.len();
+            tried_indices.insert(self.current_index);
+
+            let current_file = &self.credential_files[self.current_index];
+            
+            match self.load_credentials_from_file(current_file).await {
+                Ok(Some((creds, project_id))) => {
+                    debug!("Successfully loaded credentials: {}", creds.get_credential_id());
+                    return Ok(Some((creds, project_id)));
+                },
+                Ok(None) => {
+                    warn!("Failed to load credentials from {}, trying next", current_file.display());
+                },
+                Err(e) => {
+                    error!("Error loading credentials from {}: {}", current_file.display(), e);
+                }
+            }
+            
+            attempts += 1;
+        }
+
+        if tried_indices.len() >= self.credential_files.len() {
+            warn!("All {} credential files have been tried", self.credential_files.len());
+        } else {
+            warn!("Reached maximum retry attempts ({})", self.max_retries);
+        }
+        
+        Ok(None)
     }
 }

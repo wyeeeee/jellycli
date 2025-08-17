@@ -27,11 +27,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  Bind address: {}", config.bind_address);
     info!("  Credentials directory: {}", config.credentials_dir);
     info!("  Calls per rotation: {}", config.calls_per_rotation);
+    info!("  Max retries: {}", config.max_retries);
 
     // Initialize credential manager
     let credential_manager = CredentialManager::new(
         &config.credentials_dir,
         config.calls_per_rotation,
+        config.max_retries,
     );
 
     // Initialize GeminiCLI service

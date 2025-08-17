@@ -1,18 +1,18 @@
 [package]
-name = "gcli2api"
+name = "jellycli"
 version = "0.1.2"
 edition = "2024"
 description = "Rust implementation of GeminiCLI to OpenAI API bridge"
 
 [[bin]]
-name = "gcli2api"
+name = "jellycli"
 path = "src/main.rs"
 
 [dependencies]
 # Web framework
-axum = { version = "0.7", features = ["multipart"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "fs"] }
+axum = { version = "0.8.4", features = ["multipart"] }
+tower = "0.5.2"
+tower-http = { version = "0.6.6", features = ["cors", "fs"] }
 hyper = { version = "1.0", features = ["full"] }
 tokio = { version = "1.0", features = ["full"] }
 
@@ -31,7 +31,7 @@ futures = "0.3"
 tokio-stream = "0.1"
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0.15"
 anyhow = "1.0"
 
 # Logging
@@ -39,7 +39,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Configuration
-toml = "0.8"
+toml = "0.9.5"
 
 # UUID generation
 uuid = { version = "1.0", features = ["v4", "serde"] }

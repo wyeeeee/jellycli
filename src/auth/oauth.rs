@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+ 
 pub struct OAuthCallback {
     pub code: Option<String>,
     pub state: Option<String>,
@@ -29,13 +29,13 @@ impl Default for OAuthConfig {
     }
 }
 
-#[allow(dead_code)]
+ 
 pub struct OAuthService {
     config: OAuthConfig,
     http_client: reqwest::Client,
 }
 
-#[allow(dead_code)]
+ 
 impl OAuthService {
     pub fn new() -> Self {
         Self {
@@ -132,7 +132,7 @@ impl OAuthService {
     }
 }
 
-#[allow(dead_code)]
+ 
 pub fn get_auth_page_html(password: &str) -> String {
     format!(r#"
 <!DOCTYPE html>

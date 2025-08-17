@@ -39,7 +39,7 @@ pub async fn auth_middleware(
     ))
 }
 
-#[allow(dead_code)]
+ 
 pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")?
@@ -49,7 +49,7 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-#[allow(dead_code)]
+ 
 pub fn validate_password(token: &str, config_password: &str) -> bool {
     token == config_password
 }

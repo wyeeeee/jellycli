@@ -179,7 +179,7 @@ impl CredentialManager {
         Ok(())
     }
 
-    #[allow(dead_code)]
+     
     pub async fn set_credential_disabled(&mut self, filename: &str, disabled: bool) -> Result<()> {
         let state = self.get_credential_state(filename);
         state.disabled = disabled;
@@ -193,7 +193,7 @@ impl CredentialManager {
         Ok(())
     }
 
-    #[allow(dead_code)]
+     
     pub fn get_credentials_status(&self) -> HashMap<String, CredentialState> {
         self.credential_states.clone()
     }
@@ -287,7 +287,7 @@ impl CredentialManager {
         debug!("Call count incremented to {}/{}", self.call_count, self.calls_per_rotation);
     }
 
-    #[allow(dead_code)]
+     
     pub fn get_current_file_path(&self) -> Option<&Path> {
         self.credential_files.get(self.current_index).map(|p| p.as_path())
     }
@@ -299,7 +299,7 @@ impl CredentialManager {
             .map(|s| s.to_string())
     }
 
-    #[allow(dead_code)]
+     
     pub fn credentials_dir(&self) -> &Path {
         &self.credentials_dir
     }

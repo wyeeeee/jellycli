@@ -11,10 +11,10 @@ pub fn init_logger() {
         .init();
 }
 
-#[allow(dead_code)]
+ 
 pub struct Logger;
 
-#[allow(dead_code)]
+ 
 impl Logger {
     pub fn info(msg: &str) {
         info!("{}", msg);

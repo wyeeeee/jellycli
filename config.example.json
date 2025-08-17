@@ -2,7 +2,7 @@
   "password": "pwd",
   "bind_address": "0.0.0.0:7878",
   "credentials_dir": "./credentials",
-  "code_assist_endpoint": "https://codeassist-pa.clients6.google.com",
+  "code_assist_endpoint": "https://cloudcode-pa.googleapis.com",
   "calls_per_rotation": 1,
   "max_retries": 3
 }

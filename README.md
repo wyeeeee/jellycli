@@ -1,6 +1,5 @@
 # jellycli
 
-[![Crates.io](https://img.shields.io/crates/v/jellycli.svg)](https://crates.io/crates/jellycli)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://rustlang.org)
 

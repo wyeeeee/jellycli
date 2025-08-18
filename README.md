@@ -3,11 +3,11 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://rustlang.org)
 
-**jellycli** 是一个用 Rust 编写的高性能 API 转换服务，它将 Google Gemini API 转换为 OpenAI API 兼容格式，使得各种支持 OpenAI API 的工具和应用程序能够无缝使用 Google Gemini 模型。
+**jellycli** 是一个用 Rust 编写的高性能 CLI 反向代理服务，它为 Google Gemini CLI 提供反向代理功能，使得各种支持 OpenAI API 的工具和应用程序能够无缝使用 Google Gemini 模型。
 
 ## ✨ 功能特性
 
-- 🔄 **API 格式转换**: 无缝转换 OpenAI 和 Gemini API 之间的请求和响应格式
+- 🔄 **CLI 反向代理**: 为 Google Gemini CLI 提供高性能反向代理服务
 - 🌊 **流式响应支持**: 完全支持流式和非流式响应，包括假流式模式
 - 🔑 **多凭证管理**: 智能轮换多个 Google OAuth 凭证，绕过使用限制
 - 🔄 **自动令牌刷新**: 自动处理 access token 的过期和刷新
@@ -26,30 +26,28 @@ graph TB
     
     subgraph "jellycli 服务"
         A[认证中间件]
-        B[API 路由]
+        B[CLI 路由]
         D[凭证管理器]
-        E[Gemini API 客户端]
-        F[格式转换器]
+        E[Gemini CLI 客户端]
     end
     
     subgraph "Google 服务"
-        G[Gemini API]
+        G[Gemini CLI]
     end
     
     C --> B
     B --> A
     A --> D
     D --> E
-    E --> F
-    F --> G
+    E --> G
 ```
 
 ### 核心组件
 
 - **认证模块**: 管理 Google OAuth 凭证，包括加载、刷新、轮换和状态跟踪
-- **客户端模块**: 实现 Gemini API 客户端，处理与 Google 服务的通信
-- **模型模块**: 定义 API 数据结构和转换逻辑
-- **路由模块**: 提供 OpenAI 兼容的 API 端点
+- **客户端模块**: 实现 Gemini CLI 客户端，处理与 Google 服务的通信
+- **模型模块**: 定义数据结构
+- **路由模块**: 提供 OpenAI 兼容的 CLI 端点
 - **工具模块**: 提供配置管理、日志记录等辅助功能
 
 ## 🚀 快速开始
@@ -102,7 +100,7 @@ cp config.example.json config.json
 | `password` | String | "pwd" | API 访问密码 |
 | `bind_address` | String | "0.0.0.0:7878" | 服务绑定地址 |
 | `credentials_dir` | String | "./credentials" | 凭证文件目录 |
-| `code_assist_endpoint` | String | "https://cloudcode-pa.googleapis.com" | Gemini API 端点 |
+| `code_assist_endpoint` | String | "https://cloudcode-pa.googleapis.com" | Gemini CLI 端点 |
 | `calls_per_rotation` | Number | 1 | 每个凭证的最大调用次数 |
 | `max_retries` | Number | 3 | 最大重试次数 |
 
@@ -135,7 +133,7 @@ cargo run
 ```
 
 服务启动后，可以通过以下地址访问：
-- API 端点: `http://localhost:7878/v1`
+- CLI 端点: `http://localhost:7878/v1`
 - 健康检查: `http://localhost:7878/health`
 
 ## 📖 使用指南
@@ -149,7 +147,7 @@ cargo run
 - `gemini-2.5-pro-preview-05-06`
 - `gemini-2.5-pro-preview-05-06-假流式`
 
-### API 端点
+### CLI 端点
 
 #### 聊天补全
 

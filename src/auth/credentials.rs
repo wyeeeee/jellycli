@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use tokio::fs;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use anyhow::{Result, Context};
-use tracing::{info, warn, debug, error};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleCredentials {
@@ -23,25 +23,17 @@ pub struct GoogleCredentials {
 
 impl GoogleCredentials {
     pub fn get_credential_id(&self) -> String {
-        self.credential_id.clone().unwrap_or_else(|| "unknown".to_string())
+        self.credential_id
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CredentialState {
     pub error_codes: Vec<u16>,
     pub disabled: bool,
     pub last_success: Option<DateTime<Utc>>,
-}
-
-impl Default for CredentialState {
-    fn default() -> Self {
-        Self {
-            error_codes: Vec::new(),
-            disabled: false,
-            last_success: None,
-        }
-    }
 }
 
 pub struct CredentialManager {
@@ -57,7 +49,11 @@ pub struct CredentialManager {
 }
 
 impl CredentialManager {
-    pub fn new(credentials_dir: impl AsRef<Path>, calls_per_rotation: usize, max_retries: usize) -> Self {
+    pub fn new(
+        credentials_dir: impl AsRef<Path>,
+        calls_per_rotation: usize,
+        max_retries: usize,
+    ) -> Self {
         let credentials_dir = credentials_dir.as_ref().to_path_buf();
         let state_file = credentials_dir.join("creds_state.toml");
 
@@ -76,27 +72,32 @@ impl CredentialManager {
 
     pub async fn initialize(&mut self) -> Result<()> {
         // Create credentials directory if it doesn't exist
-        fs::create_dir_all(&self.credentials_dir).await
+        fs::create_dir_all(&self.credentials_dir)
+            .await
             .context("Failed to create credentials directory")?;
 
         // Load credential states
         self.load_states().await?;
-        
+
         // Discover credential files
         self.discover_credential_files().await?;
-        
-        info!("Credential manager initialized with {} credential files", self.credential_files.len());
+
+        info!(
+            "Credential manager initialized with {} credential files",
+            self.credential_files.len()
+        );
         Ok(())
     }
 
     async fn load_states(&mut self) -> Result<()> {
         if self.state_file.exists() {
-            let content = fs::read_to_string(&self.state_file).await
+            let content = fs::read_to_string(&self.state_file)
+                .await
                 .context("Failed to read state file")?;
-            
-            let states: HashMap<String, CredentialState> = toml::from_str(&content)
-                .context("Failed to parse state file")?;
-            
+
+            let states: HashMap<String, CredentialState> =
+                toml::from_str(&content).context("Failed to parse state file")?;
+
             self.credential_states = states;
         }
         Ok(())
@@ -105,61 +106,71 @@ impl CredentialManager {
     async fn save_states(&self) -> Result<()> {
         let content = toml::to_string(&self.credential_states)
             .context("Failed to serialize credential states")?;
-        
-        fs::write(&self.state_file, content).await
+
+        fs::write(&self.state_file, content)
+            .await
             .context("Failed to write state file")?;
-        
+
         Ok(())
     }
 
-
     async fn discover_credential_files(&mut self) -> Result<()> {
         let mut files = Vec::new();
-        
-        let mut dir_entries = fs::read_dir(&self.credentials_dir).await
+
+        let mut dir_entries = fs::read_dir(&self.credentials_dir)
+            .await
             .context("Failed to read credentials directory")?;
-        
+
         while let Some(entry) = dir_entries.next_entry().await? {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let filename = path.file_name()
+                let filename = path
+                    .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("unknown.json")
                     .to_string();
-                
+
                 // Check if credential is available (not disabled)
                 if !self.is_credential_disabled(&filename) {
                     files.push(path);
                 }
             }
         }
-        
+
         files.sort();
         self.credential_files = files;
-        
+
         if self.credential_files.is_empty() {
-            warn!("No available credential files found in {}", self.credentials_dir.display());
+            warn!(
+                "No available credential files found in {}",
+                self.credentials_dir.display()
+            );
         } else {
-            info!("Found {} available credential files", self.credential_files.len());
+            info!(
+                "Found {} available credential files",
+                self.credential_files.len()
+            );
         }
-        
+
         Ok(())
     }
 
     fn get_credential_state(&mut self, filename: &str) -> &mut CredentialState {
-        self.credential_states.entry(filename.to_string()).or_default()
+        self.credential_states
+            .entry(filename.to_string())
+            .or_default()
     }
 
     fn is_credential_disabled(&self, filename: &str) -> bool {
-        self.credential_states.get(filename)
+        self.credential_states
+            .get(filename)
             .map(|state| state.disabled)
             .unwrap_or(false)
     }
 
-
     pub async fn record_error(&mut self, filename: &str, status_code: u16) -> Result<()> {
         let state = self.get_credential_state(filename);
-        
+
         if !state.error_codes.contains(&status_code) {
             state.error_codes.push(status_code);
         }
@@ -174,31 +185,31 @@ impl CredentialManager {
         let state = self.get_credential_state(filename);
         state.error_codes.clear();
         state.last_success = Some(Utc::now());
-        
+
         self.save_states().await?;
         Ok(())
     }
 
-     
     pub async fn set_credential_disabled(&mut self, filename: &str, disabled: bool) -> Result<()> {
         let state = self.get_credential_state(filename);
         state.disabled = disabled;
-        
+
         info!("Setting disabled={} for file: {}", disabled, filename);
-        
+
         // Re-discover files if we enabled/disabled a credential
         self.discover_credential_files().await?;
-        
+
         self.save_states().await?;
         Ok(())
     }
 
-     
     pub fn get_credentials_status(&self) -> HashMap<String, CredentialState> {
         self.credential_states.clone()
     }
 
-    pub async fn get_current_credentials(&mut self) -> Result<Option<(GoogleCredentials, Option<String>)>> {
+    pub async fn get_current_credentials(
+        &mut self,
+    ) -> Result<Option<(GoogleCredentials, Option<String>)>> {
         // Check if we need to rotate credentials
         if self.call_count >= self.calls_per_rotation && !self.credential_files.is_empty() {
             self.current_index = (self.current_index + 1) % self.credential_files.len();
@@ -216,12 +227,12 @@ impl CredentialManager {
         }
 
         let current_file = &self.credential_files[self.current_index];
-        
+
         match self.load_credentials_from_file(current_file).await {
             Ok(Some((creds, project_id))) => {
                 debug!("Using credentials from {}", current_file.display());
                 Ok(Some((creds, project_id)))
-            },
+            }
             Ok(None) => {
                 // Try next file on failure
                 if self.credential_files.len() > 1 {
@@ -231,18 +242,26 @@ impl CredentialManager {
                 } else {
                     Ok(None)
                 }
-            },
+            }
             Err(e) => {
-                error!("Failed to load credentials from {}: {}", current_file.display(), e);
+                error!(
+                    "Failed to load credentials from {}: {}",
+                    current_file.display(),
+                    e
+                );
                 Ok(None)
             }
         }
     }
 
-    async fn load_credentials_from_file(&self, file_path: &Path) -> Result<Option<(GoogleCredentials, Option<String>)>> {
-        let content = fs::read_to_string(file_path).await
+    async fn load_credentials_from_file(
+        &self,
+        file_path: &Path,
+    ) -> Result<Option<(GoogleCredentials, Option<String>)>> {
+        let content = fs::read_to_string(file_path)
+            .await
             .with_context(|| format!("Failed to read credential file: {}", file_path.display()))?;
-        
+
         let mut creds: GoogleCredentials = serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse credential file: {}", file_path.display()))?;
 
@@ -252,7 +271,8 @@ impl CredentialManager {
         }
 
         // Generate credential ID from file name
-        let file_name = file_path.file_stem()
+        let file_name = file_path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
@@ -271,35 +291,39 @@ impl CredentialManager {
         }
 
         // Handle scopes
-        if creds.scopes.is_none() {
-            if let Some(scope) = &creds.scope {
-                creds.scopes = Some(scope.split_whitespace().map(|s| s.to_string()).collect());
-            }
+        if creds.scopes.is_none()
+            && let Some(scope) = &creds.scope
+        {
+            creds.scopes = Some(scope.split_whitespace().map(|s| s.to_string()).collect());
         }
 
         let project_id = creds.project_id.clone();
-        
+
         Ok(Some((creds, project_id)))
     }
 
     pub fn increment_call_count(&mut self) {
         self.call_count += 1;
-        debug!("Call count incremented to {}/{}", self.call_count, self.calls_per_rotation);
+        debug!(
+            "Call count incremented to {}/{}",
+            self.call_count, self.calls_per_rotation
+        );
     }
 
-     
     pub fn get_current_file_path(&self) -> Option<&Path> {
-        self.credential_files.get(self.current_index).map(|p| p.as_path())
+        self.credential_files
+            .get(self.current_index)
+            .map(|p| p.as_path())
     }
 
     pub fn get_current_file_name(&self) -> Option<String> {
-        self.credential_files.get(self.current_index)
+        self.credential_files
+            .get(self.current_index)
             .and_then(|p| p.file_name())
             .and_then(|name| name.to_str())
             .map(|s| s.to_string())
     }
 
-     
     pub fn credentials_dir(&self) -> &Path {
         &self.credentials_dir
     }
@@ -309,7 +333,9 @@ impl CredentialManager {
     }
 
     pub async fn refresh_credentials(&self, creds: &mut GoogleCredentials) -> Result<()> {
-        if creds.expiry.map(|exp| exp <= Utc::now()).unwrap_or(true) && !creds.refresh_token.is_empty() {
+        if creds.expiry.map(|exp| exp <= Utc::now()).unwrap_or(true)
+            && !creds.refresh_token.is_empty()
+        {
             let refresh_req = serde_json::json!({
                 "grant_type": "refresh_token",
                 "refresh_token": creds.refresh_token,
@@ -317,7 +343,8 @@ impl CredentialManager {
                 "client_secret": creds.client_secret,
             });
 
-            let response = self.http_client
+            let response = self
+                .http_client
                 .post("https://oauth2.googleapis.com/token")
                 .json(&refresh_req)
                 .send()
@@ -325,28 +352,43 @@ impl CredentialManager {
                 .context("Failed to send refresh request")?;
 
             if response.status().is_success() {
-                let refresh_resp: serde_json::Value = response.json().await
+                let refresh_resp: serde_json::Value = response
+                    .json()
+                    .await
                     .context("Failed to parse refresh response")?;
 
-                if let Some(access_token) = refresh_resp.get("access_token").and_then(|v| v.as_str()) {
+                if let Some(access_token) =
+                    refresh_resp.get("access_token").and_then(|v| v.as_str())
+                {
                     creds.access_token = Some(access_token.to_string());
-                    
-                    if let Some(expires_in) = refresh_resp.get("expires_in").and_then(|v| v.as_i64()) {
+
+                    if let Some(expires_in) =
+                        refresh_resp.get("expires_in").and_then(|v| v.as_i64())
+                    {
                         creds.expiry = Some(Utc::now() + chrono::Duration::seconds(expires_in));
                     }
-                    
-                    debug!("Successfully refreshed credentials for {}", creds.get_credential_id());
+
+                    debug!(
+                        "Successfully refreshed credentials for {}",
+                        creds.get_credential_id()
+                    );
                 }
             } else {
                 let error_text = response.text().await.unwrap_or_default();
-                return Err(anyhow::anyhow!("Failed to refresh credentials for {}: {}", creds.get_credential_id(), error_text));
+                return Err(anyhow::anyhow!(
+                    "Failed to refresh credentials for {}: {}",
+                    creds.get_credential_id(),
+                    error_text
+                ));
             }
         }
-        
+
         Ok(())
     }
 
-    pub async fn get_credentials_with_retry(&mut self) -> Result<Option<(GoogleCredentials, Option<String>)>> {
+    pub async fn get_credentials_with_retry(
+        &mut self,
+    ) -> Result<Option<(GoogleCredentials, Option<String>)>> {
         // Re-discover files if we have no available credentials
         if self.credential_files.is_empty() {
             self.discover_credential_files().await?;
@@ -365,36 +407,49 @@ impl CredentialManager {
         let mut tried_indices = std::collections::HashSet::new();
         tried_indices.insert(self.current_index); // Mark current as tried
         let mut attempts = 1; // We already tried once above
-        
+
         while attempts < self.max_retries && tried_indices.len() < self.credential_files.len() {
             // Move to next credential file
             self.current_index = (self.current_index + 1) % self.credential_files.len();
             tried_indices.insert(self.current_index);
 
             let current_file = &self.credential_files[self.current_index];
-            
+
             match self.load_credentials_from_file(current_file).await {
                 Ok(Some((creds, project_id))) => {
-                    debug!("Successfully loaded credentials: {}", creds.get_credential_id());
+                    debug!(
+                        "Successfully loaded credentials: {}",
+                        creds.get_credential_id()
+                    );
                     return Ok(Some((creds, project_id)));
-                },
+                }
                 Ok(None) => {
-                    warn!("Failed to load credentials from {}, trying next", current_file.display());
-                },
+                    warn!(
+                        "Failed to load credentials from {}, trying next",
+                        current_file.display()
+                    );
+                }
                 Err(e) => {
-                    error!("Error loading credentials from {}: {}", current_file.display(), e);
+                    error!(
+                        "Error loading credentials from {}: {}",
+                        current_file.display(),
+                        e
+                    );
                 }
             }
-            
+
             attempts += 1;
         }
 
         if tried_indices.len() >= self.credential_files.len() {
-            warn!("All {} credential files have been tried", self.credential_files.len());
+            warn!(
+                "All {} credential files have been tried",
+                self.credential_files.len()
+            );
         } else {
             warn!("Reached maximum retry attempts ({})", self.max_retries);
         }
-        
+
         Ok(None)
     }
 }

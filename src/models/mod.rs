@@ -1,7 +1,7 @@
-pub mod openai;
 pub mod gemini;
+pub mod openai;
 pub mod shared;
 
-pub use openai::*;
 pub use gemini::*;
+pub use openai::*;
 pub use shared::*;

@@ -3,8 +3,8 @@ use crate::models::GeminiThinkingConfig;
 pub fn get_base_model_name(model_name: &str) -> String {
     let suffixes = ["-maxthinking", "-nothinking"];
     for suffix in &suffixes {
-        if model_name.ends_with(suffix) {
-            return model_name[..model_name.len() - suffix.len()].to_string();
+        if let Some(stripped) = model_name.strip_suffix(suffix) {
+            return stripped.to_string();
         }
     }
     model_name.to_string()
@@ -40,7 +40,7 @@ pub fn should_include_thoughts(model_name: &str) -> bool {
 pub fn get_thinking_config(model_name: &str) -> Option<GeminiThinkingConfig> {
     let thinking_budget = get_thinking_budget(model_name)?;
     let include_thoughts = should_include_thoughts(model_name);
-    
+
     Some(GeminiThinkingConfig {
         thinking_budget,
         include_thoughts,

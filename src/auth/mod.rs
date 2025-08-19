@@ -1,6 +1,6 @@
 pub mod credentials;
-pub mod oauth;
 pub mod middleware;
+pub mod oauth;
 
 pub use credentials::*;
 // pub use oauth::*; // OAuth functionality currently unused

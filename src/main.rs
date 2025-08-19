@@ -1,14 +1,14 @@
+mod auth;
 mod client;
 mod models;
 mod routes;
 mod utils;
-mod auth;
 
 use axum::Router;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::auth::{CredentialManager, init_auth_config};
 use crate::client::GeminiCliService;
@@ -22,10 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load configuration
     let config = Arc::new(AppConfig::from_file());
-    
+
     // Initialize auth config for middleware
     init_auth_config(Arc::clone(&config));
-    
+
     info!("Starting gcli2api server...");
     info!("Configuration:");
     info!("  Bind address: {}", config.bind_address);
@@ -41,10 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Initialize GeminiCLI service
-    let service = GeminiCliService::new(
-        credential_manager,
-        config.code_assist_endpoint.clone(),
-    );
+    let service = GeminiCliService::new(credential_manager, config.code_assist_endpoint.clone());
 
     if let Err(e) = service.initialize().await {
         error!("Failed to initialize GeminiCLI service: {}", e);
@@ -56,14 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_router = create_api_routes();
     let health_router = routes::create_health_routes();
 
-    // Combine all routers  
+    // Combine all routers
     let app = Router::new()
         .merge(health_router)
         .merge(api_router.with_state(Arc::clone(&app_state)))
-        .layer(
-            ServiceBuilder::new()
-                .layer(CorsLayer::permissive())
-        );
+        .layer(ServiceBuilder::new().layer(CorsLayer::permissive()));
 
     // Start server
     let listener = tokio::net::TcpListener::bind(&config.bind_address)
@@ -78,12 +72,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("💊 Health check: http://{}/health", config.bind_address);
     info!("🔑 Default password: {}", config.password);
 
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| {
-            error!("Server error: {}", e);
-            e
-        })?;
+    axum::serve(listener, app).await.map_err(|e| {
+        error!("Server error: {}", e);
+        e
+    })?;
 
     Ok(())
 }

@@ -19,12 +19,12 @@ fn default_max_retries() -> usize {
 impl AppConfig {
     pub fn from_file() -> Self {
         // Try to read config.json, fallback to default if not found
-        if let Ok(content) = fs::read_to_string("config.json") {
-            if let Ok(config) = serde_json::from_str(&content) {
-                return config;
-            }
+        if let Ok(content) = fs::read_to_string("config.json")
+            && let Ok(config) = serde_json::from_str(&content)
+        {
+            return config;
         }
-        
+
         // Default configuration
         Self {
             password: "pwd".to_string(),
@@ -49,7 +49,7 @@ pub fn get_supported_models() -> Vec<String> {
 }
 
 pub fn get_user_agent() -> String {
-    let version = "0.1.5";  // Match Python version
+    let version = "0.1.5"; // Match Python version
     let system = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     format!("GeminiCLI/{} ({system}; {arch})", version)
@@ -67,7 +67,7 @@ pub fn get_client_metadata(project_id: &str) -> serde_json::Value {
 pub fn get_platform_string() -> String {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
-    
+
     match (os, arch) {
         ("macos", "aarch64") => "DARWIN_ARM64".to_string(),
         ("macos", _) => "DARWIN_AMD64".to_string(),

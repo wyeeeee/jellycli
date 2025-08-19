@@ -214,9 +214,9 @@ impl GeminiApiClient {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes);
                     // Parse SSE format
-                    if text.starts_with("data: ") {
-                        let json_str = &text[6..].trim();
-                        if *json_str == "[DONE]" {
+                    if let Some(stripped) = text.strip_prefix("data: ") {
+                        let json_str = stripped.trim();
+                        if json_str == "[DONE]" {
                             return Err(anyhow::anyhow!("Stream complete"));
                         }
 

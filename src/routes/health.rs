@@ -1,9 +1,5 @@
-use axum::{
-    response::Json,
-    routing::get,
-    Router,
-};
-use serde_json::{json, Value};
+use axum::{Router, response::Json, routing::get};
+use serde_json::{Value, json};
 
 pub fn create_health_routes() -> Router {
     Router::new()

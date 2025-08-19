@@ -1,23 +1,24 @@
+use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, Context};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::CredentialManager;
 use crate::client::GeminiApiClient;
 use crate::models::{
-    OpenAIChatCompletionRequest, OpenAIChatCompletionResponse, 
-    OpenAIChatCompletionStreamResponse, OpenAIChatCompletionStreamChoice,
-    OpenAIDelta, ErrorResponse, ApiError
+    ApiError, ErrorResponse, OpenAIChatCompletionRequest, OpenAIChatCompletionResponse,
+    OpenAIChatCompletionStreamChoice, OpenAIChatCompletionStreamResponse, OpenAIDelta,
 };
-use crate::utils::{openai_to_gemini_request, gemini_to_openai_response, gemini_stream_to_openai_stream};
+use crate::utils::{
+    gemini_stream_to_openai_stream, gemini_to_openai_response, openai_to_gemini_request,
+};
 
-use axum::{
-    response::{Response, Json, Sse, IntoResponse},
-    http::StatusCode,
-};
 use axum::response::sse::{Event, KeepAlive};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Json, Response, Sse},
+};
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 pub struct GeminiCliService {
@@ -26,10 +27,7 @@ pub struct GeminiCliService {
 }
 
 impl GeminiCliService {
-    pub fn new(
-        credential_manager: CredentialManager,
-        code_assist_endpoint: String,
-    ) -> Self {
+    pub fn new(credential_manager: CredentialManager, code_assist_endpoint: String) -> Self {
         Self {
             credential_manager: Arc::new(RwLock::new(credential_manager)),
             gemini_client: GeminiApiClient::new(code_assist_endpoint),
@@ -38,9 +36,11 @@ impl GeminiCliService {
 
     pub async fn initialize(&self) -> Result<()> {
         let mut manager = self.credential_manager.write().await;
-        manager.initialize().await
+        manager
+            .initialize()
+            .await
             .context("Failed to initialize credential manager")?;
-        
+
         // Try to get initial credentials and onboard
         if let Ok(Some((creds, project_id))) = manager.get_current_credentials().await {
             if let Some(project_id) = project_id {
@@ -51,7 +51,9 @@ impl GeminiCliService {
                 }
             }
         } else {
-            warn!("No credentials available on startup - service will return errors until credentials are added via OAuth");
+            warn!(
+                "No credentials available on startup - service will return errors until credentials are added via OAuth"
+            );
         }
 
         info!("GeminiCli service initialized successfully");
@@ -93,7 +95,7 @@ impl GeminiCliService {
         }
 
         // Prepare request with retry mechanism
-        let (gemini_request, creds, project_id, current_file_name) = 
+        let (gemini_request, creds, project_id, current_file_name) =
             match self.prepare_request_with_retry(&request).await {
                 Ok(data) => data,
                 Err(e) => {
@@ -108,16 +110,37 @@ impl GeminiCliService {
 
         // Handle streaming vs non-streaming with retry
         if request.stream {
-            self.handle_streaming_request_with_retry(gemini_request, &real_model, &creds, &project_id, &current_file_name, &request).await
+            self.handle_streaming_request_with_retry(
+                gemini_request,
+                &real_model,
+                &creds,
+                &project_id,
+                &current_file_name,
+                &request,
+            )
+            .await
         } else {
-            self.handle_non_streaming_request_with_retry(gemini_request, &real_model, &creds, &project_id, &current_file_name, &request).await
+            self.handle_non_streaming_request_with_retry(
+                gemini_request,
+                &real_model,
+                &creds,
+                &project_id,
+                &current_file_name,
+                &request,
+            )
+            .await
         }
     }
 
     async fn prepare_request(
         &self,
         request: &OpenAIChatCompletionRequest,
-    ) -> Result<(crate::models::GeminiRequest, crate::auth::GoogleCredentials, Option<String>, Option<String>)> {
+    ) -> Result<(
+        crate::models::GeminiRequest,
+        crate::auth::GoogleCredentials,
+        Option<String>,
+        Option<String>,
+    )> {
         // Increment call count and get credentials
         let mut manager = self.credential_manager.write().await;
         manager.increment_call_count();
@@ -144,7 +167,12 @@ impl GeminiCliService {
     async fn prepare_request_with_retry(
         &self,
         request: &OpenAIChatCompletionRequest,
-    ) -> Result<(crate::models::GeminiRequest, crate::auth::GoogleCredentials, Option<String>, Option<String>)> {
+    ) -> Result<(
+        crate::models::GeminiRequest,
+        crate::auth::GoogleCredentials,
+        Option<String>,
+        Option<String>,
+    )> {
         // Increment call count and get credentials with retry
         let mut manager = self.credential_manager.write().await;
         manager.increment_call_count();
@@ -178,16 +206,22 @@ impl GeminiCliService {
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
         let response_id = format!("chatcmpl-{}", Uuid::new_v4());
         let credential_id = creds.get_credential_id();
-        
-        info!("🚀 Starting streaming request - Model: {}, Credential: {}, RequestID: {}", 
-              model, credential_id, response_id);
-        
+
+        info!(
+            "🚀 Starting streaming request - Model: {}, Credential: {}, RequestID: {}",
+            model, credential_id, response_id
+        );
+
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
             self.create_error_response("No project ID available", "invalid_request_error", 400)
         })?;
-        
-        match self.gemini_client.send_streaming_request(&gemini_request, model, creds, project_id_str).await {
+
+        match self
+            .gemini_client
+            .send_streaming_request(&gemini_request, model, creds, project_id_str)
+            .await
+        {
             Ok(mut stream) => {
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(100);
                 let response_id_clone = response_id.clone();
@@ -202,22 +236,26 @@ impl GeminiCliService {
                         match result {
                             Ok(chunk) => {
                                 let openai_chunk = gemini_stream_to_openai_stream(
-                                    &chunk, 
-                                    &model_clone, 
-                                    &response_id_clone
+                                    &chunk,
+                                    &model_clone,
+                                    &response_id_clone,
                                 );
-                                
+
                                 let event_data = serde_json::to_string(&openai_chunk)
                                     .unwrap_or_else(|_| "{}".to_string());
-                                
-                                if tx.send(Ok(Event::default().data(event_data))).await.is_err() {
+
+                                if tx
+                                    .send(Ok(Event::default().data(event_data)))
+                                    .await
+                                    .is_err()
+                                {
                                     break;
                                 }
-                            },
+                            }
                             Err(e) => {
                                 error!("Streaming error: {}", e);
                                 has_error = true;
-                                
+
                                 let error_chunk = serde_json::json!({
                                     "error": {
                                         "message": e.to_string(),
@@ -225,8 +263,10 @@ impl GeminiCliService {
                                         "code": 500
                                     }
                                 });
-                                
-                                let _ = tx.send(Ok(Event::default().data(error_chunk.to_string()))).await;
+
+                                let _ = tx
+                                    .send(Ok(Event::default().data(error_chunk.to_string())))
+                                    .await;
                                 break;
                             }
                         }
@@ -240,15 +280,27 @@ impl GeminiCliService {
                         let mut manager = credential_manager.write().await;
                         if has_error {
                             let _ = manager.record_error(&file_path, 500).await;
-                            info!("❌ Streaming request completed with error - RequestID: {}", response_id_clone);
+                            info!(
+                                "❌ Streaming request completed with error - RequestID: {}",
+                                response_id_clone
+                            );
                         } else {
                             let _ = manager.record_success(&file_path).await;
-                            info!("✅ Streaming request completed successfully - RequestID: {}", response_id_clone);
+                            info!(
+                                "✅ Streaming request completed successfully - RequestID: {}",
+                                response_id_clone
+                            );
                         }
                     } else if has_error {
-                        info!("❌ Streaming request completed with error - RequestID: {}", response_id_clone);
+                        info!(
+                            "❌ Streaming request completed with error - RequestID: {}",
+                            response_id_clone
+                        );
                     } else {
-                        info!("✅ Streaming request completed successfully - RequestID: {}", response_id_clone);
+                        info!(
+                            "✅ Streaming request completed successfully - RequestID: {}",
+                            response_id_clone
+                        );
                     }
                 });
 
@@ -256,12 +308,14 @@ impl GeminiCliService {
                 Ok(Sse::new(stream)
                     .keep_alive(KeepAlive::default())
                     .into_response())
-            },
+            }
             Err(e) => {
                 error!("Failed to create streaming request: {}", e);
-                info!("❌ Streaming request failed to start - Model: {}, Credential: {}, Error: {}", 
-                      model, credential_id, e);
-                
+                info!(
+                    "❌ Streaming request failed to start - Model: {}, Credential: {}, Error: {}",
+                    model, credential_id, e
+                );
+
                 // Record error if we have file path
                 if let Some(file_path) = current_file_name {
                     let mut manager = self.credential_manager.write().await;
@@ -287,16 +341,22 @@ impl GeminiCliService {
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
         let credential_id = creds.get_credential_id();
         let request_id = format!("req-{}", Uuid::new_v4());
-        
-        info!("🚀 Starting non-streaming request - Model: {}, Credential: {}, RequestID: {}", 
-              model, credential_id, request_id);
-        
+
+        info!(
+            "🚀 Starting non-streaming request - Model: {}, Credential: {}, RequestID: {}",
+            model, credential_id, request_id
+        );
+
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
             self.create_error_response("No project ID available", "invalid_request_error", 400)
         })?;
-        
-        match self.gemini_client.send_non_streaming_request(&gemini_request, model, creds, project_id_str).await {
+
+        match self
+            .gemini_client
+            .send_non_streaming_request(&gemini_request, model, creds, project_id_str)
+            .await
+        {
             Ok(gemini_response) => {
                 // Record success
                 if let Some(file_path) = current_file_name {
@@ -304,25 +364,27 @@ impl GeminiCliService {
                     let _ = manager.record_success(file_path).await;
                 }
 
-                info!("✅ Non-streaming request completed successfully - RequestID: {}", request_id);
+                info!(
+                    "✅ Non-streaming request completed successfully - RequestID: {}",
+                    request_id
+                );
                 let openai_response = gemini_to_openai_response(&gemini_response, model);
                 Ok(Json(openai_response).into_response())
-            },
+            }
             Err(e) => {
                 error!("Non-streaming request failed: {}", e);
-                info!("❌ Non-streaming request failed - RequestID: {}, Error: {}", request_id, e);
-                
+                info!(
+                    "❌ Non-streaming request failed - RequestID: {}, Error: {}",
+                    request_id, e
+                );
+
                 // Record error if we have file path
                 if let Some(file_path) = current_file_name {
                     let mut manager = self.credential_manager.write().await;
                     let _ = manager.record_error(file_path, 500).await;
                 }
 
-                Err(self.create_error_response(
-                    &format!("Request failed: {}", e),
-                    "api_error",
-                    500,
-                ))
+                Err(self.create_error_response(&format!("Request failed: {}", e), "api_error", 500))
             }
         }
     }
@@ -332,7 +394,7 @@ impl GeminiCliService {
         request: OpenAIChatCompletionRequest,
     ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
         let request_id = format!("fake-{}", Uuid::new_v4());
-        
+
         // Get credential ID for logging from current credentials
         let credential_id = if let Ok(Some((creds, _))) = {
             let mut manager = self.credential_manager.write().await;
@@ -342,10 +404,12 @@ impl GeminiCliService {
         } else {
             "unknown".to_string()
         };
-        
-        info!("🚀 Starting fake streaming request - Model: {}, Credential: {}, RequestID: {}", 
-              request.model, credential_id, request_id);
-        
+
+        info!(
+            "🚀 Starting fake streaming request - Model: {}, Credential: {}, RequestID: {}",
+            request.model, credential_id, request_id
+        );
+
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(100);
         let service = self.clone();
 
@@ -375,30 +439,32 @@ impl GeminiCliService {
                 Ok(response) => {
                     // Extract content and send as stream chunk
                     if let Ok(response_json) = serde_json::to_value(&response)
-                        && let Some(choices) = response_json.get("choices").and_then(|c| c.as_array())
-                            && let Some(first_choice) = choices.first()
-                                && let Some(message) = first_choice.get("message")
-                                    && let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-                                        let content_chunk = OpenAIChatCompletionStreamResponse {
-                                            id: format!("chatcmpl-{}", Uuid::new_v4()),
-                                            object: "chat.completion.chunk".to_string(),
-                                            created: chrono::Utc::now().timestamp(),
-                                            model: response.model.clone(),
-                                            choices: vec![OpenAIChatCompletionStreamChoice {
-                                                index: 0,
-                                                delta: OpenAIDelta {
-                                                    role: None,
-                                                    content: Some(content.to_string()),
-                                                    reasoning_content: None,
-                                                },
-                                                finish_reason: Some("stop".to_string()),
-                                            }],
-                                        };
+                        && let Some(choices) =
+                            response_json.get("choices").and_then(|c| c.as_array())
+                        && let Some(first_choice) = choices.first()
+                        && let Some(message) = first_choice.get("message")
+                        && let Some(content) = message.get("content").and_then(|c| c.as_str())
+                    {
+                        let content_chunk = OpenAIChatCompletionStreamResponse {
+                            id: format!("chatcmpl-{}", Uuid::new_v4()),
+                            object: "chat.completion.chunk".to_string(),
+                            created: chrono::Utc::now().timestamp(),
+                            model: response.model.clone(),
+                            choices: vec![OpenAIChatCompletionStreamChoice {
+                                index: 0,
+                                delta: OpenAIDelta {
+                                    role: None,
+                                    content: Some(content.to_string()),
+                                    reasoning_content: None,
+                                },
+                                finish_reason: Some("stop".to_string()),
+                            }],
+                        };
 
-                                        let chunk_data = serde_json::to_string(&content_chunk).unwrap_or_default();
-                                        let _ = tx.send(Ok(Event::default().data(chunk_data))).await;
-                                    }
-                },
+                        let chunk_data = serde_json::to_string(&content_chunk).unwrap_or_default();
+                        let _ = tx.send(Ok(Event::default().data(chunk_data))).await;
+                    }
+                }
                 Err(e) => {
                     let error_chunk = serde_json::json!({
                         "error": {
@@ -407,15 +473,23 @@ impl GeminiCliService {
                             "code": 500
                         }
                     });
-                    let _ = tx.send(Ok(Event::default().data(error_chunk.to_string()))).await;
-                    info!("❌ Fake streaming request failed - RequestID: {}, Error: {}", request_id, e);
+                    let _ = tx
+                        .send(Ok(Event::default().data(error_chunk.to_string())))
+                        .await;
+                    info!(
+                        "❌ Fake streaming request failed - RequestID: {}, Error: {}",
+                        request_id, e
+                    );
                     return;
                 }
             }
 
             // Send [DONE]
             let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
-            info!("✅ Fake streaming request completed successfully - RequestID: {}", request_id);
+            info!(
+                "✅ Fake streaming request completed successfully - RequestID: {}",
+                request_id
+            );
         });
 
         let stream = ReceiverStream::new(rx);
@@ -428,14 +502,21 @@ impl GeminiCliService {
         &self,
         request: OpenAIChatCompletionRequest,
     ) -> Result<OpenAIChatCompletionResponse> {
-        let (gemini_request, creds, project_id, current_file_name) = self.prepare_request(&request).await?;
+        let (gemini_request, creds, project_id, current_file_name) =
+            self.prepare_request(&request).await?;
         let credential_id = creds.get_credential_id();
-        
-        let project_id_str = project_id.as_ref().ok_or_else(|| anyhow::anyhow!("No project ID available"))?;
-        
-        debug!("Internal non-streaming request - Model: {}, Credential: {}", request.model, credential_id);
-        
-        let gemini_response = self.gemini_client
+
+        let project_id_str = project_id
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No project ID available"))?;
+
+        debug!(
+            "Internal non-streaming request - Model: {}, Credential: {}",
+            request.model, credential_id
+        );
+
+        let gemini_response = self
+            .gemini_client
             .send_non_streaming_request(&gemini_request, &request.model, &creds, project_id_str)
             .await?;
 
@@ -485,19 +566,21 @@ impl GeminiCliService {
         };
 
         loop {
-            let result = self.handle_streaming_request(
-                gemini_request.clone(),
-                model,
-                &creds,
-                &project_id,
-                &current_file_name,
-            ).await;
+            let result = self
+                .handle_streaming_request(
+                    gemini_request.clone(),
+                    model,
+                    &creds,
+                    &project_id,
+                    &current_file_name,
+                )
+                .await;
 
             match result {
                 Ok(response) => return Ok(response),
                 Err((status_code, error_response)) => {
                     attempts += 1;
-                    
+
                     // Record error for current credential
                     if let Some(file_path) = &current_file_name {
                         let mut manager = self.credential_manager.write().await;
@@ -512,13 +595,17 @@ impl GeminiCliService {
                     // Try to get next credentials
                     match self.prepare_request_with_retry(original_request).await {
                         Ok((new_gemini_request, new_creds, new_project_id, new_file_path)) => {
-                            info!("Retrying streaming request with new credentials: {} (attempt {}/{})", 
-                                  new_creds.get_credential_id(), attempts + 1, max_retries);
+                            info!(
+                                "Retrying streaming request with new credentials: {} (attempt {}/{})",
+                                new_creds.get_credential_id(),
+                                attempts + 1,
+                                max_retries
+                            );
                             gemini_request = new_gemini_request;
                             creds = new_creds;
                             project_id = new_project_id;
                             current_file_name = new_file_path;
-                        },
+                        }
                         Err(e) => {
                             error!("Failed to prepare retry request: {}", e);
                             return Err((status_code, error_response));
@@ -548,19 +635,21 @@ impl GeminiCliService {
         };
 
         loop {
-            let result = self.handle_non_streaming_request(
-                gemini_request.clone(),
-                model,
-                &creds,
-                &project_id,
-                &current_file_name,
-            ).await;
+            let result = self
+                .handle_non_streaming_request(
+                    gemini_request.clone(),
+                    model,
+                    &creds,
+                    &project_id,
+                    &current_file_name,
+                )
+                .await;
 
             match result {
                 Ok(response) => return Ok(response),
                 Err((status_code, error_response)) => {
                     attempts += 1;
-                    
+
                     // Record error for current credential
                     if let Some(file_path) = &current_file_name {
                         let mut manager = self.credential_manager.write().await;
@@ -575,13 +664,17 @@ impl GeminiCliService {
                     // Try to get next credentials
                     match self.prepare_request_with_retry(original_request).await {
                         Ok((new_gemini_request, new_creds, new_project_id, new_file_path)) => {
-                            info!("Retrying non-streaming request with new credentials: {} (attempt {}/{})", 
-                                  new_creds.get_credential_id(), attempts + 1, max_retries);
+                            info!(
+                                "Retrying non-streaming request with new credentials: {} (attempt {}/{})",
+                                new_creds.get_credential_id(),
+                                attempts + 1,
+                                max_retries
+                            );
                             gemini_request = new_gemini_request;
                             creds = new_creds;
                             project_id = new_project_id;
                             current_file_name = new_file_path;
-                        },
+                        }
                         Err(e) => {
                             error!("Failed to prepare retry request: {}", e);
                             return Err((status_code, error_response));

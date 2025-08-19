@@ -33,7 +33,7 @@ pub struct OpenAIChatCompletionRequest {
     pub seed: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<HashMap<String, serde_json::Value>>,
-    
+
     // Allow additional fields
     #[serde(flatten)]
     pub additional_fields: HashMap<String, serde_json::Value>,
@@ -99,8 +99,8 @@ impl OpenAIChatCompletionRequest {
     }
 
     pub fn is_health_check(&self) -> bool {
-        self.messages.len() == 1 
-            && self.messages[0].role == "user" 
+        self.messages.len() == 1
+            && self.messages[0].role == "user"
             && self.messages[0].content.as_str() == Some("Hi")
     }
 
@@ -116,8 +116,9 @@ impl OpenAIChatCompletionRequest {
 
     pub fn limit_max_tokens(&mut self) {
         if let Some(max_tokens) = self.max_tokens
-            && max_tokens > 65535 {
-                self.max_tokens = Some(65535);
-            }
+            && max_tokens > 65535
+        {
+            self.max_tokens = Some(65535);
+        }
     }
 }

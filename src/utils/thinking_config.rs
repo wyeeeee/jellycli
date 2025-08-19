@@ -40,7 +40,7 @@ pub fn should_include_thoughts(model_name: &str) -> bool {
 pub fn get_thinking_config(model_name: &str) -> Option<GeminiThinkingConfig> {
     let thinking_budget = get_thinking_budget(model_name)?;
     let include_thoughts = should_include_thoughts(model_name);
-    
+
     Some(GeminiThinkingConfig {
         thinking_budget,
         include_thoughts,

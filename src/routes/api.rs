@@ -1,17 +1,15 @@
 use axum::{
+    Router,
     extract::State,
     middleware,
-    response::{Json, IntoResponse},
+    response::{IntoResponse, Json},
     routing::{get, post},
-    Router,
 };
 use std::sync::Arc;
 
 use crate::auth::auth_middleware;
 use crate::client::GeminiCliService;
-use crate::models::{
-    ModelList, Model, OpenAIChatCompletionRequest
-};
+use crate::models::{Model, ModelList, OpenAIChatCompletionRequest};
 use crate::utils::get_supported_models;
 
 pub type AppState = Arc<GeminiCliService>;

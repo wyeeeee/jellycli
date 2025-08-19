@@ -115,10 +115,9 @@ impl OpenAIChatCompletionRequest {
     }
 
     pub fn limit_max_tokens(&mut self) {
-        if let Some(max_tokens) = self.max_tokens {
-            if max_tokens > 65535 {
+        if let Some(max_tokens) = self.max_tokens
+            && max_tokens > 65535 {
                 self.max_tokens = Some(65535);
             }
-        }
     }
 }

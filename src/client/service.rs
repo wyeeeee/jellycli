@@ -185,7 +185,7 @@ impl GeminiCliService {
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
             self.create_error_response("No project ID available", "invalid_request_error", 400)
-        }).map_err(|e| e)?;
+        })?;
         
         match self.gemini_client.send_streaming_request(&gemini_request, model, creds, project_id_str).await {
             Ok(mut stream) => {
@@ -245,12 +245,10 @@ impl GeminiCliService {
                             let _ = manager.record_success(&file_path).await;
                             info!("✅ Streaming request completed successfully - RequestID: {}", response_id_clone);
                         }
+                    } else if has_error {
+                        info!("❌ Streaming request completed with error - RequestID: {}", response_id_clone);
                     } else {
-                        if has_error {
-                            info!("❌ Streaming request completed with error - RequestID: {}", response_id_clone);
-                        } else {
-                            info!("✅ Streaming request completed successfully - RequestID: {}", response_id_clone);
-                        }
+                        info!("✅ Streaming request completed successfully - RequestID: {}", response_id_clone);
                     }
                 });
 
@@ -296,7 +294,7 @@ impl GeminiCliService {
         let project_id_str = project_id.as_ref().ok_or_else(|| {
             error!("No project ID available");
             self.create_error_response("No project ID available", "invalid_request_error", 400)
-        }).map_err(|e| e)?;
+        })?;
         
         match self.gemini_client.send_non_streaming_request(&gemini_request, model, creds, project_id_str).await {
             Ok(gemini_response) => {
@@ -376,11 +374,11 @@ impl GeminiCliService {
             match service.handle_non_streaming_request_internal(request).await {
                 Ok(response) => {
                     // Extract content and send as stream chunk
-                    if let Ok(response_json) = serde_json::to_value(&response) {
-                        if let Some(choices) = response_json.get("choices").and_then(|c| c.as_array()) {
-                            if let Some(first_choice) = choices.first() {
-                                if let Some(message) = first_choice.get("message") {
-                                    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                    if let Ok(response_json) = serde_json::to_value(&response)
+                        && let Some(choices) = response_json.get("choices").and_then(|c| c.as_array())
+                            && let Some(first_choice) = choices.first()
+                                && let Some(message) = first_choice.get("message")
+                                    && let Some(content) = message.get("content").and_then(|c| c.as_str()) {
                                         let content_chunk = OpenAIChatCompletionStreamResponse {
                                             id: format!("chatcmpl-{}", Uuid::new_v4()),
                                             object: "chat.completion.chunk".to_string(),
@@ -400,10 +398,6 @@ impl GeminiCliService {
                                         let chunk_data = serde_json::to_string(&content_chunk).unwrap_or_default();
                                         let _ = tx.send(Ok(Event::default().data(chunk_data))).await;
                                     }
-                                }
-                            }
-                        }
-                    }
                 },
                 Err(e) => {
                     let error_chunk = serde_json::json!({

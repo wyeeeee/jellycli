@@ -19,11 +19,10 @@ fn default_max_retries() -> usize {
 impl AppConfig {
     pub fn from_file() -> Self {
         // Try to read config.json, fallback to default if not found
-        if let Ok(content) = fs::read_to_string("config.json") {
-            if let Ok(config) = serde_json::from_str(&content) {
+        if let Ok(content) = fs::read_to_string("config.json")
+            && let Ok(config) = serde_json::from_str(&content) {
                 return config;
             }
-        }
         
         // Default configuration
         Self {

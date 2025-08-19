@@ -28,21 +28,13 @@ impl GoogleCredentials {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CredentialState {
     pub error_codes: Vec<u16>,
     pub disabled: bool,
     pub last_success: Option<DateTime<Utc>>,
 }
 
-impl Default for CredentialState {
-    fn default() -> Self {
-        Self {
-            error_codes: Vec::new(),
-            disabled: false,
-            last_success: None,
-        }
-    }
-}
 
 pub struct CredentialManager {
     credentials_dir: PathBuf,
@@ -271,11 +263,10 @@ impl CredentialManager {
         }
 
         // Handle scopes
-        if creds.scopes.is_none() {
-            if let Some(scope) = &creds.scope {
+        if creds.scopes.is_none()
+            && let Some(scope) = &creds.scope {
                 creds.scopes = Some(scope.split_whitespace().map(|s| s.to_string()).collect());
             }
-        }
 
         let project_id = creds.project_id.clone();
         

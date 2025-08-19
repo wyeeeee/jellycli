@@ -27,9 +27,7 @@ pub async fn auth_middleware(
     
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                let user_password = &auth_str[7..];
-                
+            if let Some(user_password) = auth_str.strip_prefix("Bearer ") {
                 if user_password == system_password {
                     info!("✅ Authentication successful");
                     return Ok(next.run(request).await);

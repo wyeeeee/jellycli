@@ -37,7 +37,7 @@ impl GeminiApiClient {
             });
 
             let load_response = self.http_client
-                .post(&format!("{}/v1internal:loadCodeAssist", self.code_assist_endpoint))
+                .post(format!("{}/v1internal:loadCodeAssist", self.code_assist_endpoint))
                 .headers(headers.clone())
                 .json(&load_assist_payload)
                 .send()
@@ -89,7 +89,7 @@ impl GeminiApiClient {
 
             loop {
                 let onboard_response = self.http_client
-                    .post(&format!("{}/v1internal:onboardUser", self.code_assist_endpoint))
+                    .post(format!("{}/v1internal:onboardUser", self.code_assist_endpoint))
                     .headers(headers.clone())
                     .json(&onboard_payload)
                     .send()

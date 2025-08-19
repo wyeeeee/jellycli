@@ -119,13 +119,11 @@ impl OAuthService {
             let projects_response: serde_json::Value = response.json().await
                 .context("Failed to parse projects response")?;
             
-            if let Some(projects) = projects_response.get("projects").and_then(|p| p.as_array()) {
-                if let Some(first_project) = projects.first() {
-                    if let Some(project_id) = first_project.get("projectId").and_then(|p| p.as_str()) {
+            if let Some(projects) = projects_response.get("projects").and_then(|p| p.as_array())
+                && let Some(first_project) = projects.first()
+                    && let Some(project_id) = first_project.get("projectId").and_then(|p| p.as_str()) {
                         return Ok(Some(project_id.to_string()));
                     }
-                }
-            }
         }
         
         Ok(None)

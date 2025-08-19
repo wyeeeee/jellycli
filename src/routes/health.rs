@@ -26,9 +26,8 @@ async fn root_handler() -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "endpoints": {
             "api": "http://127.0.0.1:7878/v1",
-            "auth": "http://127.0.0.1:7878/auth",
             "health": "http://127.0.0.1:7878/health",
         },
-        "documentation": "https://github.com/su-kaka/gcli2api"
+        "documentation": "https://github.com/wyeeeee/jellycli"
     }))
 }

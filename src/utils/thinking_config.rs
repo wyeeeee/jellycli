@@ -3,8 +3,8 @@ use crate::models::GeminiThinkingConfig;
 pub fn get_base_model_name(model_name: &str) -> String {
     let suffixes = ["-maxthinking", "-nothinking"];
     for suffix in &suffixes {
-        if model_name.ends_with(suffix) {
-            return model_name[..model_name.len() - suffix.len()].to_string();
+        if let Some(stripped) = model_name.strip_suffix(suffix) {
+            return stripped.to_string();
         }
     }
     model_name.to_string()

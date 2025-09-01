@@ -398,19 +398,34 @@ impl CredentialManager {
             }
         }
 
-        // First, try to get current credentials (with rotation logic)
-        if let Ok(Some(result)) = self.get_current_credentials().await {
-            return Ok(Some(result));
+        // Try to get current credentials (with rotation logic)
+        match self.get_current_credentials().await {
+            Ok(Some(result)) => return Ok(Some(result)),
+            Ok(None) => {
+                // If current credentials are not available, try other credentials immediately
+                debug!("Current credentials not available, trying other credentials");
+            }
+            Err(e) => {
+                // If there's an error getting current credentials, try other credentials
+                debug!("Error getting current credentials: {}, trying other credentials", e);
+            }
         }
 
-        // If that fails, try other credentials
+        // Try other credentials
         let mut tried_indices = std::collections::HashSet::new();
-        tried_indices.insert(self.current_index); // Mark current as tried
-        let mut attempts = 1; // We already tried once above
+        // Don't mark current index as tried yet, we'll try it last if needed
+        let start_index = self.current_index;
+        let mut attempts = 0;
 
         while attempts < self.max_retries && tried_indices.len() < self.credential_files.len() {
             // Move to next credential file
             self.current_index = (self.current_index + 1) % self.credential_files.len();
+            
+            // If we've tried all other credentials and are back to start, break
+            if self.current_index == start_index && !tried_indices.is_empty() {
+                break;
+            }
+            
             tried_indices.insert(self.current_index);
 
             let current_file = &self.credential_files[self.current_index];
@@ -439,6 +454,35 @@ impl CredentialManager {
             }
 
             attempts += 1;
+        }
+
+        // If we still haven't found valid credentials, try the original current index one more time
+        if attempts < self.max_retries && !tried_indices.contains(&start_index) {
+            let current_file = &self.credential_files[start_index];
+            match self.load_credentials_from_file(current_file).await {
+                Ok(Some((creds, project_id))) => {
+                    debug!(
+                        "Successfully loaded credentials from original index: {}",
+                        creds.get_credential_id()
+                    );
+                    // Update current index to the successful one
+                    self.current_index = start_index;
+                    return Ok(Some((creds, project_id)));
+                }
+                Ok(None) => {
+                    warn!(
+                        "Failed to load credentials from original index {}",
+                        current_file.display()
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Error loading credentials from original index {}: {}",
+                        current_file.display(),
+                        e
+                    );
+                }
+            }
         }
 
         if tried_indices.len() >= self.credential_files.len() {

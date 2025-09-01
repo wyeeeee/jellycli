@@ -1,12 +1,40 @@
 use tracing::{debug, error, info, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use std::fs::OpenOptions;
+use std::sync::Arc;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
-pub fn init_logger() {
+pub fn init_logger(log_file: &str, log_level: &str) {
+    // Parse the directory and file name from the log_file path
+    let log_path = std::path::Path::new(log_file);
+    let log_dir = log_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = log_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("jellycli.log"));
+    
+    // Create a rolling file appender that rotates daily
+    // This will create files like: jellycli.log, jellycli.log.2025-09-01, jellycli.log.2025-09-02, etc.
+    let file_appender = RollingFileAppender::new(
+        Rotation::DAILY,
+        log_dir,
+        file_name,
+    );
+    
+    // Create a fmt layer for file output
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)  // Disable ANSI colors in file output
+        .with_writer(file_appender);
+    
+    // Create a fmt layer for console output
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr);
+    
+    // Create an EnvFilter for log level
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| log_level.into());
+    
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
+        .with(filter)
+        .with(file_layer)
+        .with(console_layer)
         .init();
 }
 

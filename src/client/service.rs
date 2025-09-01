@@ -231,6 +231,7 @@ impl GeminiCliService {
 
                 tokio::spawn(async move {
                     let mut has_error = false;
+                    let mut stream_ended = false;
 
                     while let Some(result) = stream.next().await {
                         match result {
@@ -249,6 +250,8 @@ impl GeminiCliService {
                                     .await
                                     .is_err()
                                 {
+                                    // Channel closed, stream ended
+                                    stream_ended = true;
                                     break;
                                 }
                             }
@@ -272,8 +275,10 @@ impl GeminiCliService {
                         }
                     }
 
-                    // Send [DONE] event
-                    let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
+                    // Send [DONE] event if stream hasn't ended yet
+                    if !stream_ended {
+                        let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
+                    }
 
                     // Record success/error and log completion
                     if let Some(file_path) = current_file_clone {

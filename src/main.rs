@@ -17,11 +17,12 @@ use crate::utils::{AppConfig, init_logger};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging
-    init_logger();
-
     // Load configuration
     let config = Arc::new(AppConfig::from_file());
+    
+    // Initialize logging
+    init_logger(&config.log_file, &config.log_level);
+
 
     // Initialize auth config for middleware
     init_auth_config(Arc::clone(&config));

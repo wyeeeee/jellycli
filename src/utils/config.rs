@@ -10,10 +10,22 @@ pub struct AppConfig {
     pub calls_per_rotation: usize,
     #[serde(default = "default_max_retries")]
     pub max_retries: usize,
+    #[serde(default = "default_log_file")]
+    pub log_file: String,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
 
 fn default_max_retries() -> usize {
     3
+}
+
+fn default_log_file() -> String {
+    "jellycli.log".to_string()
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
 }
 
 impl AppConfig {
@@ -33,6 +45,8 @@ impl AppConfig {
             code_assist_endpoint: "https://codeassist-pa.clients6.google.com".to_string(),
             calls_per_rotation: 1,
             max_retries: default_max_retries(),
+            log_file: default_log_file(),
+            log_level: default_log_level(),
         }
     }
 }

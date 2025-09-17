@@ -8,10 +8,14 @@ WORKDIR /app
 # The CI/CD pipeline will place the binary here.
 COPY jellycli .
 
+# Grant execute permissions to the binary
+RUN chmod +x ./jellycli
+
 # Expose the port the app runs on
 EXPOSE 7878
 
 # Create directories for volumes and set permissions for a non-root user
+# The chown will also apply to the jellycli binary
 RUN mkdir -p /app/credentials /app/logs && chown -R 1001:1001 /app
 
 # Define volumes for config, credentials, and logs

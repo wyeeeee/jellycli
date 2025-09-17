@@ -1,5 +1,5 @@
-# Use a slim base image
-FROM debian:slim
+# Use a slim base image with a specific version for stability
+FROM debian:bullseye-slim
 
 # Set working directory
 WORKDIR /app

@@ -98,12 +98,14 @@ cargo build --release
 
 ### 配置
 
-1. 复制配置文件模板：
+1. 创建 `config.json` 文件：
+
 ```bash
-cp config.example.json config.json
+# 创建配置文件
+nano config.json
 ```
 
-2. 编辑 `config.json` 文件：
+2. 编辑 `config.json` 文件内容：
 
 ```json
 {

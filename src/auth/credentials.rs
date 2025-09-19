@@ -407,7 +407,10 @@ impl CredentialManager {
             }
             Err(e) => {
                 // If there's an error getting current credentials, try other credentials
-                debug!("Error getting current credentials: {}, trying other credentials", e);
+                debug!(
+                    "Error getting current credentials: {}, trying other credentials",
+                    e
+                );
             }
         }
 
@@ -420,12 +423,12 @@ impl CredentialManager {
         while attempts < self.max_retries && tried_indices.len() < self.credential_files.len() {
             // Move to next credential file
             self.current_index = (self.current_index + 1) % self.credential_files.len();
-            
+
             // If we've tried all other credentials and are back to start, break
             if self.current_index == start_index && !tried_indices.is_empty() {
                 break;
             }
-            
+
             tried_indices.insert(self.current_index);
 
             let current_file = &self.credential_files[self.current_index];

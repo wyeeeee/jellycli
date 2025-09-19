@@ -1,28 +1,19 @@
-# Use a slim base image with a specific version for stability
-FROM debian:bullseye-slim
+# 构建阶段
+FROM rust:alpine AS builder
 
-# Set working directory
+RUN apk add --no-cache musl-dev
 WORKDIR /app
+COPY . .
+RUN cargo build --release --target x86_64-unknown-linux-musl
 
-# Copy the pre-compiled binary from the build context
-# The CI/CD pipeline will place the binary here.
-COPY jellycli .
+# 运行阶段
+FROM alpine:latest
 
-# Grant execute permissions to the binary
-RUN chmod +x ./jellycli
+RUN adduser -D -u 1001 jellycli
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/jellycli /app/jellycli
 
-# Expose the port the app runs on
+WORKDIR /app
 EXPOSE 7878
-
-# Create directories for volumes and set permissions for a non-root user
-# The chown will also apply to the jellycli binary
-RUN mkdir -p /app/credentials /app/logs && chown -R 1001:1001 /app
-
-# Define volumes for config, credentials, and logs
-VOLUME ["/app/credentials", "/app/logs"]
-
-# Switch to a non-root user for security
 USER 1001
 
-# Set the entrypoint to run the application
 CMD ["./jellycli"]

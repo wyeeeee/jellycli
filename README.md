@@ -59,15 +59,38 @@ graph TB
 
 ### 安装
 
+#### Docker 安装（推荐）
 
-#### 从release 安装
+使用预构建的 Docker 镜像是最简单的安装方式：
 
-从release 下载二进制文件
+**Docker Compose 配置**：
+
+创建 `docker-compose.yml` 文件：
+
+```yaml
+services:
+  jellycli:
+    image: ghcr.io/wyeeeee/jellycli:latest
+    container_name: jellycli
+    restart: unless-stopped
+    ports:
+      - "7878:7878"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./credentials:/app/credentials
+      - ./logs:/app/logs
+    environment:
+      - RUST_LOG=info
+```
+
+#### 从 Release 安装
+
+从 [Releases](https://github.com/wyeeeee/jellycli/releases) 页面下载对应平台的二进制文件。
 
 #### 从源码构建
 
 ```bash
-git clone https://github.com/yourusername/jellycli.git
+git clone https://github.com/wyeeeee/jellycli.git
 cd jellycli
 cargo build --release
 ```
@@ -75,12 +98,14 @@ cargo build --release
 
 ### 配置
 
-1. 复制配置文件模板：
+1. 创建 `config.json` 文件：
+
 ```bash
-cp config.example.json config.json
+# 创建配置文件
+nano config.json
 ```
 
-2. 编辑 `config.json` 文件：
+2. 编辑 `config.json` 文件内容：
 
 ```json
 {
@@ -125,6 +150,17 @@ mkdir credentials
 ```
 
 ### 启动服务
+
+#### 使用 Docker
+
+```bash
+docker-compose up -d
+
+# 查看日志
+docker logs -f jellycli
+```
+
+#### 使用二进制文件
 
 ```bash
 cargo run

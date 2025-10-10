@@ -1,11 +1,37 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GeminiInlineData {
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeminiPartData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "inlineData")]
+    pub inline_data: Option<GeminiInlineData>,
+}
+
+impl Default for GeminiPartData {
+    fn default() -> Self {
+        Self {
+            text: Some(String::new()),
+            thought: Some(false),
+            inline_data: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GeminiPart {
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub thought: bool,
+    #[serde(flatten, default)]
+    pub data: GeminiPartData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -97,4 +123,67 @@ pub struct GeminiStreamChunk {
     pub candidates: Vec<GeminiCandidate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_metadata: Option<GeminiUsageMetadata>,
+}
+
+impl GeminiPart {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            data: GeminiPartData {
+                text: Some(text.into()),
+                thought: Some(false),
+                inline_data: None,
+            },
+        }
+    }
+
+    pub fn text_with_thought(text: impl Into<String>, thought: bool) -> Self {
+        Self {
+            data: GeminiPartData {
+                text: Some(text.into()),
+                thought: Some(thought),
+                inline_data: None,
+            },
+        }
+    }
+
+    pub fn inline_data(mime_type: impl Into<String>, data: impl Into<String>) -> Self {
+        Self {
+            data: GeminiPartData {
+                text: None,
+                thought: None,
+                inline_data: Some(GeminiInlineData {
+                    mime_type: mime_type.into(),
+                    data: data.into(),
+                }),
+            },
+        }
+    }
+
+    pub fn get_text(&self) -> Option<&str> {
+        match &self.data {
+            GeminiPartData { text: Some(text), .. } => Some(text),
+            _ => None,
+        }
+    }
+
+    pub fn is_thought(&self) -> bool {
+        match &self.data {
+            GeminiPartData { thought: Some(thought), .. } => *thought,
+            _ => false,
+        }
+    }
+
+    pub fn get_inline_data(&self) -> Option<&GeminiInlineData> {
+        match &self.data {
+            GeminiPartData { inline_data: Some(inline_data), .. } => Some(inline_data),
+            _ => None,
+        }
+    }
+
+    pub fn is_empty_text(&self) -> bool {
+        match &self.data {
+            GeminiPartData { text: Some(text), .. } => text.is_empty(),
+            GeminiPartData { text: None, .. } => true,
+        }
+    }
 }

@@ -37,7 +37,16 @@ pub fn should_include_thoughts(model_name: &str) -> bool {
     }
 }
 
+pub fn is_image_model(model_name: &str) -> bool {
+    model_name.contains("gemini-2.5-flash-image")
+}
+
 pub fn get_thinking_config(model_name: &str) -> Option<GeminiThinkingConfig> {
+    // Image models don't support thinking
+    if is_image_model(model_name) {
+        return None;
+    }
+
     let thinking_budget = get_thinking_budget(model_name)?;
     let include_thoughts = should_include_thoughts(model_name);
 

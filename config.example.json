@@ -6,5 +6,6 @@
   "calls_per_rotation": 1,
   "max_retries": 3,
   "log_file": "logs/jellycli.log",
-  "log_level": "info"
+  "log_level": "info",
+  "debug_api": false
 }

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
+use futures::StreamExt as FuturesStreamExt;
 use reqwest::{Client, Response, header::HeaderMap};
 use serde_json::Value;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::Stream;
 use tracing::{debug, info, warn};
 
 use crate::auth::GoogleCredentials;
@@ -221,95 +222,114 @@ impl GeminiApiClient {
 
         let stream = response.bytes_stream();
         let debug_enabled = self.config.debug_api;
-        let chunk_stream = stream.map(move |result| {
-            match result {
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
 
-                    // Debug output for streaming chunks
-                    if debug_enabled {
-                        info!("🌊 [DEBUG] Streaming chunk: {}", text);
+        // 使用 unfold 来处理带状态的流转换,累积不完整的 SSE 消息
+        let chunk_stream = futures::stream::unfold(
+            (stream, String::new()),
+            move |(mut stream, mut buffer)| async move {
+                loop {
+                    // 首先尝试从现有缓冲区解析完整的 SSE 事件
+                    if let Some(end_pos) = buffer.find("\n\n").or_else(|| buffer.find("\r\n\r\n")) {
+                        let event = if buffer[end_pos..].starts_with("\r\n") {
+                            let event = buffer[..end_pos].to_string();
+                            buffer.replace_range(..end_pos + 4, "");
+                            event
+                        } else {
+                            let event = buffer[..end_pos].to_string();
+                            buffer.replace_range(..end_pos + 2, "");
+                            event
+                        };
+
+                        // 解析 SSE 事件中的 data 字段
+                        for line in event.lines() {
+                            if let Some(data) = line.strip_prefix("data: ") {
+                                let json_str = data.trim();
+
+                                if json_str == "[DONE]" {
+                                    return None;
+                                }
+
+                                if json_str.is_empty() {
+                                    continue;
+                                }
+
+                                if debug_enabled {
+                                    info!("🔍 [DEBUG] Parsing SSE data: {}", json_str);
+                                }
+
+                                // 解析 JSON
+                                match serde_json::from_str::<serde_json::Value>(json_str) {
+                                    Ok(value) => {
+                                        let chunk_result = if let Some(response_data) = value.get("response") {
+                                            serde_json::from_value::<GeminiStreamChunk>(response_data.clone())
+                                        } else {
+                                            serde_json::from_value::<GeminiStreamChunk>(value)
+                                        };
+
+                                        match chunk_result {
+                                            Ok(chunk) => {
+                                                return Some((Ok(chunk), (stream, buffer)));
+                                            }
+                                            Err(e) => {
+                                                warn!("Failed to parse chunk: {}", e);
+                                                // 返回空 chunk 而不是失败
+                                                return Some((
+                                                    Ok(GeminiStreamChunk {
+                                                        candidates: vec![],
+                                                        usage_metadata: None,
+                                                    }),
+                                                    (stream, buffer),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to parse JSON: {} - data: {}", e, json_str);
+                                        return Some((
+                                            Err(anyhow::anyhow!("Parse error: {}", e)),
+                                            (stream, buffer),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        // 如果事件中没有 data 行,继续处理下一个事件
+                        continue;
                     }
 
-                    // Parse SSE format
-                    if let Some(stripped) = text.strip_prefix("data: ") {
-                        let json_str = stripped.trim();
-                        if json_str == "[DONE]" {
-                            return Err(anyhow::anyhow!("Stream complete"));
-                        }
-
-                        // First try to parse as wrapped response
-                        match serde_json::from_str::<serde_json::Value>(json_str) {
-                            Ok(value) => {
-                                if let Some(response_data) = value.get("response") {
-                                    // Try to parse the inner response as GeminiStreamChunk
-                                    match serde_json::from_value::<GeminiStreamChunk>(
-                                        response_data.clone(),
-                                    ) {
-                                        Ok(chunk) => Ok(chunk),
-                                        Err(e) => {
-                                            warn!("Failed to parse inner response: {}", e);
-                                            // Create a basic chunk for non-standard responses
-                                            Ok(GeminiStreamChunk {
-                                                candidates: vec![],
-                                                usage_metadata: None,
-                                            })
-                                        }
-                                    }
-                                } else {
-                                    // Try to parse directly as GeminiStreamChunk
-                                    match serde_json::from_value::<GeminiStreamChunk>(value) {
-                                        Ok(chunk) => Ok(chunk),
-                                        Err(e) => {
-                                            warn!("Failed to parse stream chunk: {}", e);
-                                            // Create a basic chunk for non-standard responses
-                                            Ok(GeminiStreamChunk {
-                                                candidates: vec![],
-                                                usage_metadata: None,
-                                            })
-                                        }
+                    // 缓冲区没有完整事件,读取更多数据
+                    match stream.next().await {
+                        Some(Ok(bytes)) => {
+                            match std::str::from_utf8(bytes.as_ref()) {
+                                Ok(text) => {
+                                    buffer.push_str(text);
+                                    if debug_enabled {
+                                        info!("🌊 [DEBUG] Buffer updated, size: {}", buffer.len());
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                warn!("Failed to parse JSON: {}", e);
-                                Err(anyhow::anyhow!("Parse error: {}", e))
-                            }
-                        }
-                    } else {
-                        // Try to parse as JSON directly
-                        match serde_json::from_str::<serde_json::Value>(&text) {
-                            Ok(value) => {
-                                if let Some(response_data) = value.get("response") {
-                                    match serde_json::from_value::<GeminiStreamChunk>(
-                                        response_data.clone(),
-                                    ) {
-                                        Ok(chunk) => Ok(chunk),
-                                        Err(_) => Ok(GeminiStreamChunk {
-                                            candidates: vec![],
-                                            usage_metadata: None,
-                                        }),
-                                    }
-                                } else {
-                                    match serde_json::from_value::<GeminiStreamChunk>(value) {
-                                        Ok(chunk) => Ok(chunk),
-                                        Err(_) => Ok(GeminiStreamChunk {
-                                            candidates: vec![],
-                                            usage_metadata: None,
-                                        }),
-                                    }
+                                Err(e) => {
+                                    return Some((
+                                        Err(anyhow::anyhow!("Invalid UTF-8: {}", e)),
+                                        (stream, buffer),
+                                    ));
                                 }
                             }
-                            Err(e) => {
-                                debug!("Skipping non-JSON chunk: {}", text);
-                                Err(anyhow::anyhow!("Non-JSON chunk: {}", e))
-                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(anyhow::anyhow!("Stream error: {}", e)),
+                                (stream, buffer),
+                            ));
+                        }
+                        None => {
+                            // 流结束
+                            return None;
                         }
                     }
                 }
-                Err(e) => Err(anyhow::anyhow!("Stream error: {}", e)),
-            }
-        });
+            },
+        );
 
         Ok(Box::pin(chunk_stream))
     }

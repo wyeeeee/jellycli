@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use reqwest::{Client, Response, header::HeaderMap};
 use serde_json::Value;
 use std::pin::Pin;
-use std::sync::Arc;
 use tokio_stream::{Stream, StreamExt};
 use tracing::{debug, info, warn};
 
@@ -13,15 +12,13 @@ use crate::utils::{get_client_metadata, get_user_agent};
 pub struct GeminiApiClient {
     http_client: Client,
     pub code_assist_endpoint: String,
-    config: Arc<crate::utils::AppConfig>,
 }
 
 impl GeminiApiClient {
-    pub fn new(code_assist_endpoint: String, config: Arc<crate::utils::AppConfig>) -> Self {
+    pub fn new(code_assist_endpoint: String) -> Self {
         Self {
             http_client: Client::new(),
             code_assist_endpoint,
-            config,
         }
     }
 
@@ -178,14 +175,6 @@ impl GeminiApiClient {
             serde_json::to_string_pretty(&final_payload)?
         );
 
-        // Print detailed debug info if enabled
-        if self.config.debug_api {
-            info!("🚀 [DEBUG] Gemini API Request:");
-            info!("🚀 [DEBUG] URL: {}", url);
-            info!("🚀 [DEBUG] Headers: {:?}", headers);
-            info!("🚀 [DEBUG] Payload: {}", serde_json::to_string_pretty(&final_payload).unwrap_or_default());
-        }
-
         let response = self
             .http_client
             .post(&url)
@@ -220,17 +209,10 @@ impl GeminiApiClient {
         }
 
         let stream = response.bytes_stream();
-        let debug_enabled = self.config.debug_api;
-        let chunk_stream = stream.map(move |result| {
+        let chunk_stream = stream.map(|result| {
             match result {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes);
-
-                    // Debug output for streaming chunks
-                    if debug_enabled {
-                        info!("🌊 [DEBUG] Streaming chunk: {}", text);
-                    }
-
                     // Parse SSE format
                     if let Some(stripped) = text.strip_prefix("data: ") {
                         let json_str = stripped.trim();
@@ -325,10 +307,8 @@ impl GeminiApiClient {
             .send_request(request, model, creds, project_id, false)
             .await?;
 
-        let status = response.status();
-        let headers = response.headers().clone();
-
-        if !status.is_success() {
+        if !response.status().is_success() {
+            let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             return Err(anyhow::anyhow!(
                 "Non-streaming request failed {}: {}",
@@ -343,41 +323,6 @@ impl GeminiApiClient {
             .context("Failed to get response text")?;
 
         debug!("Raw Gemini response: {}", response_text);
-
-        // Print detailed debug info if enabled
-        if self.config.debug_api {
-
-            info!("🔍 [DEBUG] Raw Gemini API Response:");
-            info!("🔍 [DEBUG] Status: {}", status);
-            info!("🔍 [DEBUG] Headers: {:?}", headers);
-            info!("🔍 [DEBUG] Response Body: {}", response_text);
-
-            // Try to parse and print structured data
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                info!("🔍 [DEBUG] Parsed JSON Response:");
-                info!("🔍 [DEBUG] {}", serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| "Failed to pretty print".to_string()));
-
-                // Check for image data
-                if let Some(candidates) = parsed.get("candidates").and_then(|c| c.as_array()) {
-                    for (i, candidate) in candidates.iter().enumerate() {
-                        info!("🔍 [DEBUG] Candidate {}: {}", i, serde_json::to_string_pretty(candidate).unwrap_or_default());
-
-                        if let Some(content) = candidate.get("content") {
-                            if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
-                                for (j, part) in parts.iter().enumerate() {
-                                    info!("🔍 [DEBUG]   Part {}: {}", j, serde_json::to_string_pretty(part).unwrap_or_default());
-
-                                    // Check if this part contains image data
-                                    if part.get("inlineData").is_some() {
-                                        info!("🖼️ [DEBUG]   🎯 Found image data in part {}!", j);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // Try to parse as wrapped response first (like streaming does)
         let parsed_response: serde_json::Value =

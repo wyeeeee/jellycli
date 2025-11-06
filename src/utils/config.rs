@@ -14,8 +14,6 @@ pub struct AppConfig {
     pub log_file: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    #[serde(default = "default_debug_api")]
-    pub debug_api: bool,
 }
 
 fn default_max_retries() -> usize {
@@ -28,10 +26,6 @@ fn default_log_file() -> String {
 
 fn default_log_level() -> String {
     "info".to_string()
-}
-
-fn default_debug_api() -> bool {
-    false
 }
 
 impl AppConfig {
@@ -53,7 +47,6 @@ impl AppConfig {
             max_retries: default_max_retries(),
             log_file: default_log_file(),
             log_level: default_log_level(),
-            debug_api: default_debug_api(),
         }
     }
 }
@@ -66,9 +59,6 @@ pub fn get_supported_models() -> Vec<String> {
         "gemini-2.5-pro-假流式".to_string(),
         "gemini-2.5-pro-preview-05-06".to_string(),
         "gemini-2.5-pro-preview-05-06-假流式".to_string(),
-        "gemini-2.5-flash-preview-09-2025".to_string(),
-        "gemini-2.5-flash-image-preview".to_string(),
-        "gemini-2.5-flash-image-preview-假流式".to_string(),
     ]
 }
 

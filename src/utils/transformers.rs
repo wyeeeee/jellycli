@@ -9,132 +9,6 @@ use chrono::Utc;
 use serde_json::Value;
 use uuid::Uuid;
 
-fn parse_content_parts(content: &Value) -> Vec<GeminiPart> {
-    match content {
-        Value::String(s) => {
-            // Parse markdown images in text content
-            parse_text_with_images(s)
-        }
-        Value::Array(arr) => {
-            // Handle OpenAI's array format for multimodal content
-            let mut parts = Vec::new();
-
-            for item in arr {
-                if let Value::Object(obj) = item {
-                    // Handle text parts
-                    if let Some(Value::String(text)) = obj.get("text") {
-                        if !text.trim().is_empty() {
-                            parts.append(&mut parse_text_with_images(text));
-                        }
-                    }
-
-                    // Handle image_url parts (OpenAI format)
-                    if let Some(image_url_obj) = obj.get("image_url") {
-                        if let Some(Value::String(image_url)) = image_url_obj.get("url") {
-                            if let Some(part) = parse_image_url(image_url) {
-                                parts.push(part);
-                            }
-                        }
-                    }
-                }
-            }
-
-            parts
-        }
-        _ => vec![GeminiPart::text(content.to_string())],
-    }
-}
-
-fn parse_text_with_images(text: &str) -> Vec<GeminiPart> {
-    let mut parts = Vec::new();
-
-    // Regular expression to match markdown images: ![alt](url)
-    let re = regex::Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
-
-    let mut last_end = 0;
-
-    for cap in re.captures_iter(text) {
-        let full_match = cap.get(0).unwrap();
-        let _alt_text = cap.get(1).unwrap().as_str();
-        let url = cap.get(2).unwrap().as_str();
-
-        // Add text before the image
-        if full_match.start() > last_end {
-            let text_before = &text[last_end..full_match.start()];
-            if !text_before.trim().is_empty() {
-                parts.push(GeminiPart::text(text_before));
-            }
-        }
-
-        // Handle the image
-        if let Some(image_part) = parse_image_url(url) {
-            parts.push(image_part);
-        } else {
-            // If image parsing fails, keep the original markdown
-            parts.push(GeminiPart::text(full_match.as_str().to_string()));
-        }
-
-        last_end = full_match.end();
-    }
-
-    // Add remaining text
-    if last_end < text.len() {
-        let remaining_text = &text[last_end..];
-        if !remaining_text.trim().is_empty() {
-            parts.push(GeminiPart::text(remaining_text));
-        }
-    }
-
-    // If no images were found, just return the text as a single part
-    if parts.is_empty() {
-        parts.push(GeminiPart::text(text));
-    }
-
-    parts
-}
-
-fn parse_image_url(url: &str) -> Option<GeminiPart> {
-    // Handle data URI images: data:image/png;base64,xxxxx
-    if url.starts_with("data:") {
-        if let Ok((mime_type, data)) = parse_data_uri(url) {
-            return Some(GeminiPart::inline_data(mime_type, data));
-        }
-    }
-
-    // For non-data URIs, we can't process them without fetching
-    // So we return None and let the caller handle it
-    None
-}
-
-fn parse_data_uri(url: &str) -> Result<(String, String), &'static str> {
-    // Expected format: data:image/png;base64,xxxxx
-    if !url.starts_with("data:") {
-        return Err("Invalid data URI format");
-    }
-
-    // Remove "data:" prefix
-    let rest = &url[5..];
-
-    // Split at comma to separate metadata from data
-    let parts: Vec<&str> = rest.splitn(2, ',').collect();
-    if parts.len() != 2 {
-        return Err("Invalid data URI format - missing comma");
-    }
-
-    let metadata = parts[0];
-    let data = parts[1];
-
-    // Parse mime type from metadata (e.g., "image/png;base64" -> "image/png")
-    let mime_parts: Vec<&str> = metadata.split(';').collect();
-    let mime_type = mime_parts.first().unwrap_or(&"image/png");
-
-    // Default to image/png if mime type is empty
-    let final_mime_type = if mime_type.is_empty() { "image/png" } else { mime_type };
-
-    Ok((final_mime_type.to_string(), data.to_string()))
-}
-
-
 pub fn openai_to_gemini_request(openai_req: &OpenAIChatCompletionRequest) -> GeminiRequest {
     let contents = openai_req
         .messages
@@ -146,9 +20,35 @@ pub fn openai_to_gemini_request(openai_req: &OpenAIChatCompletionRequest) -> Gem
                 _ => msg.role.clone(),
             };
 
-            let parts = parse_content_parts(&msg.content);
+            let text = match &msg.content {
+                Value::String(s) => s.clone(),
+                Value::Array(arr) => {
+                    // Handle array of message parts
+                    arr.iter()
+                        .filter_map(|item| {
+                            if let Value::Object(obj) = item {
+                                if let Some(Value::String(text)) = obj.get("text") {
+                                    Some(text.as_str())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                }
+                _ => msg.content.to_string(),
+            };
 
-            GeminiContent { role, parts }
+            GeminiContent {
+                role,
+                parts: vec![GeminiPart {
+                    text,
+                    thought: false,
+                }],
+            }
         })
         .collect();
 
@@ -203,58 +103,17 @@ pub fn openai_to_gemini_request(openai_req: &OpenAIChatCompletionRequest) -> Gem
 }
 
 fn extract_content_and_reasoning(parts: &[GeminiPart]) -> (String, String) {
-    let mut content_parts = Vec::new();
+    let mut content = String::new();
     let mut reasoning_content = String::new();
 
-    // Debug: Print the parts we received
-    println!("🔍 DEBUG: extract_content_and_reasoning received {} parts", parts.len());
-    for (i, part) in parts.iter().enumerate() {
-        match &part.data {
-            crate::models::GeminiPartData { text: Some(text), thought: Some(thought), inline_data: None } => {
-                println!("🔍 DEBUG: Part {} - Text: '{}' ({} chars, thought: {})", i, text, text.len(), thought);
-                if !text.is_empty() {
-                    if *thought {
-                        reasoning_content.push_str(text);
-                    } else {
-                        content_parts.push(text.clone());
-                    }
-                }
-            }
-            crate::models::GeminiPartData { text: Some(text), thought: None, inline_data: None } => {
-                println!("🔍 DEBUG: Part {} - Text: '{}' ({} chars, thought: None)", i, text, text.len());
-                if !text.is_empty() {
-                    content_parts.push(text.clone());
-                }
-            }
-            crate::models::GeminiPartData { text: None, thought: None, inline_data: Some(inline_data) } => {
-                println!("🔍 DEBUG: Part {} - Image: {} ({} bytes)", i, inline_data.mime_type, inline_data.data.len());
-                // Convert inline image data back to markdown format
-                if !inline_data.data.is_empty() {
-                    let markdown_image = format!(
-                        "![image](data:{};base64,{})",
-                        inline_data.mime_type, inline_data.data
-                    );
-                    println!("🔍 DEBUG: Adding markdown image: {}", &markdown_image[..50]);
-                    content_parts.push(markdown_image);
-                }
-            }
-            crate::models::GeminiPartData { text: None, thought: None, inline_data: None } => {
-                // Empty part, skip
-                println!("🔍 DEBUG: Part {} - Empty part", i);
-            }
-            _ => {
-                // Handle edge cases
-                println!("🔍 DEBUG: Part {} - Unexpected data structure: {:?}", i, part.data);
+    for part in parts {
+        if !part.text.is_empty() {
+            if part.thought {
+                reasoning_content.push_str(&part.text);
+            } else {
+                content.push_str(&part.text);
             }
         }
-    }
-
-    let content = content_parts.join("\n\n");
-    println!("🔍 DEBUG: Final content length: {} chars", content.len());
-    if content.len() > 100 {
-        println!("🔍 DEBUG: Final content preview: {}", &content[..100]);
-    } else {
-        println!("🔍 DEBUG: Final content: {}", content);
     }
 
     (content, reasoning_content)

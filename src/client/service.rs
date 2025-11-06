@@ -24,16 +24,13 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 pub struct GeminiCliService {
     credential_manager: Arc<RwLock<CredentialManager>>,
     gemini_client: GeminiApiClient,
-    config: Arc<crate::utils::AppConfig>,
 }
 
 impl GeminiCliService {
     pub fn new(credential_manager: CredentialManager, code_assist_endpoint: String) -> Self {
-        let config = Arc::new(crate::utils::AppConfig::from_file());
         Self {
             credential_manager: Arc::new(RwLock::new(credential_manager)),
-            gemini_client: GeminiApiClient::new(code_assist_endpoint, Arc::clone(&config)),
-            config,
+            gemini_client: GeminiApiClient::new(code_assist_endpoint),
         }
     }
 
@@ -698,11 +695,7 @@ impl Clone for GeminiCliService {
     fn clone(&self) -> Self {
         Self {
             credential_manager: Arc::clone(&self.credential_manager),
-            gemini_client: GeminiApiClient::new(
-                self.gemini_client.code_assist_endpoint.clone(),
-                Arc::clone(&self.config),
-            ),
-            config: Arc::clone(&self.config),
+            gemini_client: GeminiApiClient::new(self.gemini_client.code_assist_endpoint.clone()),
         }
     }
 }

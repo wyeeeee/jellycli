@@ -20,11 +20,11 @@ tokio = { version = "1.0", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
 # JSON serialization
-serde = { version = "1.0.227", features = ["derive"] }
-serde_json = "1.0.145"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.143"
 
 # Date and time
-chrono = { version = "0.4.42", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 # Async streams
 futures = "0.3"
@@ -32,7 +32,7 @@ tokio-stream = "0.1"
 
 # Error handling
 thiserror = "2.0.16"
-anyhow = "1.0.100"
+anyhow = "1.0"
 
 # Logging
 tracing = "0.1"
@@ -40,10 +40,10 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 tracing-appender = "0.2"
 
 # Configuration
-toml = "0.9.7"
+toml = "0.9.5"
 
 # UUID generation
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # URL encoding
 urlencoding = "2.1"
@@ -56,6 +56,3 @@ url = "2.5.7"
 
 # Async trait
 async-trait = "0.1"
-
-# Regular expressions
-regex = "1.10"

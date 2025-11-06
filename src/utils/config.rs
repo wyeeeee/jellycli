@@ -59,6 +59,8 @@ pub fn get_supported_models() -> Vec<String> {
         "gemini-2.5-pro-假流式".to_string(),
         "gemini-2.5-pro-preview-05-06".to_string(),
         "gemini-2.5-pro-preview-05-06-假流式".to_string(),
+        "gemini-2.5-flash-preview-09-2025".to_string(),
+        "gemini-3.0-pro-preview-11-2025".to_string(),
     ]
 }
 
